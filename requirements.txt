@@ -23,4 +23,4 @@ joblib==1.4.2  # usado por sklearn e RandomizedSearchCV
 
 # Outras libs úteis
 openpyxl==3.1.2  # para ler arquivos .xlsx no pandas
-pyarrow==15.0.2  # caso use parquet
+pyarrow==14.0.2  # caso use parquet

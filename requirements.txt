@@ -1,0 +1,26 @@
+# App Web
+streamlit==1.35.0
+
+# Manipulação de dados
+pandas==2.2.2
+numpy==1.26.4
+
+# Visualização
+matplotlib==3.9.0
+seaborn==0.13.2  # caso esteja usando no heatmap da classificação
+plotly==5.22.0   # opcional se quiser gráficos interativos
+
+# Machine Learning
+scikit-learn==1.5.0
+xgboost==2.0.3
+
+# Séries Temporais
+statsmodels==0.14.2
+scipy==1.13.1  # para ADF, FFT etc.
+
+# Otimização
+joblib==1.4.2  # usado por sklearn e RandomizedSearchCV
+
+# Outras libs úteis
+openpyxl==3.1.2  # para ler arquivos .xlsx no pandas
+pyarrow==15.0.2  # caso use parquet

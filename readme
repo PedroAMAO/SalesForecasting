@@ -1,0 +1,43 @@
+# 🔮 Forecast App – Previsão de Vendas com Streamlit + IA
+
+Este é um aplicativo interativo desenvolvido em **Streamlit** para realizar **previsão de séries temporais de vendas** com alto grau de explicabilidade e precisão, combinando **modelagem estatística clássica** com **algoritmos de Machine Learning**.
+
+---
+
+## 🎯 Objetivo
+
+Ajudar empresas e analistas a preverem vendas futuras com mais confiança, reduzindo erros de planejamento e melhorando a tomada de decisão com base em dados — não em achismos.
+
+---
+
+## 🧠 Principais Funcionalidades
+
+### 📊 Modelo Clássico
+- Decomposição logarítmica da série
+- Estimativa de **tendência** (linear, quadrática ou média)
+- **Sazonalidade** média mensal
+- Modelagem do **ruído via ARIMA**, com opção de otimização automática
+- Teste de estacionaridade (ADF) e análise de ciclos via **FFT**
+- Geração de **intervalos de confiança (IC 95%)** por mês
+
+### 🤖 Machine Learning
+- Algoritmos: `RandomForest`, `XGBoost`, `MLP`, `Bayesian Ridge`, `KNN`, `VotingEnsemble`
+- Features derivadas: lags, médias móveis, erro entre modelos, variações percentuais, componentes sazonais via FFT
+- Otimização de hiperparâmetros com `RandomizedSearchCV`
+- Previsões futuras mais precisas com IC ajustado
+
+### 🧪 Classificação Binária
+- Predição se o próximo valor **vai subir ou não**
+- Ajuste de threshold
+- Métricas: F1, Accuracy, Precision, Recall
+- Curva Precision vs Recall interativa
+
+---
+
+## 📁 Como Rodar Localmente
+
+1. Clone este repositório:
+
+```bash
+git clone https://github.com/seu-usuario/nome-do-repo.git
+cd nome-do-repo

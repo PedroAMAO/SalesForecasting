@@ -6,7 +6,7 @@ pandas==2.2.2
 numpy==1.26.4
 
 # Visualização
-#matplotlib==3.9.0
+
 matplotlib==3.8.4
 seaborn==0.13.2  # caso esteja usando no heatmap da classificação
 plotly==5.22.0   # opcional se quiser gráficos interativos

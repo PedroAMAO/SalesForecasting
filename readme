@@ -1,43 +1,197 @@
-# 🔮 Forecast App – Previsão de Vendas com Streamlit + IA
+📈 Plataforma de Previsão de Vendas — Tendência + ARIMA + Machine Learning
 
-Este é um aplicativo interativo desenvolvido em **Streamlit** para realizar **previsão de séries temporais de vendas** com alto grau de explicabilidade e precisão, combinando **modelagem estatística clássica** com **algoritmos de Machine Learning**.
+Este projeto implementa um sistema completo de previsão de vendas, combinando:
 
----
+Modelo Clássico (tendência + sazonalidade média),
 
-## 🎯 Objetivo
+ARIMA (modelagem de ruído no log),
 
-Ajudar empresas e analistas a preverem vendas futuras com mais confiança, reduzindo erros de planejamento e melhorando a tomada de decisão com base em dados — não em achismos.
+Meta-Modelo de Machine Learning (XGBoost com lags, deltas e erros históricos),
 
----
+Rolling Evaluation (1-step ahead) — totalmente realista, sem vazamento,
 
-## 🧠 Principais Funcionalidades
+Interpretação Automática via LLM,
 
-### 📊 Modelo Clássico
-- Decomposição logarítmica da série
-- Estimativa de **tendência** (linear, quadrática ou média)
-- **Sazonalidade** média mensal
-- Modelagem do **ruído via ARIMA**, com opção de otimização automática
-- Teste de estacionaridade (ADF) e análise de ciclos via **FFT**
-- Geração de **intervalos de confiança (IC 95%)** por mês
+Exportação de Relatório Profissional em PDF.
 
-### 🤖 Machine Learning
-- Algoritmos: `RandomForest`, `XGBoost`, `MLP`, `Bayesian Ridge`, `KNN`, `VotingEnsemble`
-- Features derivadas: lags, médias móveis, erro entre modelos, variações percentuais, componentes sazonais via FFT
-- Otimização de hiperparâmetros com `RandomizedSearchCV`
-- Previsões futuras mais precisas com IC ajustado
+Tudo Isso dentro de uma aplicação Streamlit simples de operar.
 
-### 🧪 Classificação Binária
-- Predição se o próximo valor **vai subir ou não**
-- Ajuste de threshold
-- Métricas: F1, Accuracy, Precision, Recall
-- Curva Precision vs Recall interativa
+🚀 Funcionalidades Principais
+🔹 1. Upload de base
 
----
+O app lê um .xlsx com as colunas:
 
-## 📁 Como Rodar Localmente
+Ano
 
-1. Clone este repositório:
+Mês
 
-```bash
-git clone https://github.com/seu-usuario/nome-do-repo.git
-cd nome-do-repo
+Filial
+
+Realizado
+
+O sistema aceita variações de maiúsculas/minúsculas e nomes alternativos.
+
+🔹 2. Pré-processamento automático
+
+O pipeline automaticamente:
+
+Converte ano/mês para datas mensais (YYYY-MM-01)
+
+Calcula participação da filial (“Real Share %”) caso desejado
+
+Organiza série temporal
+
+Cria coluna t (índice temporal)
+
+Limpa e padroniza colunas
+
+🔹 3. Três Modelos de Previsão
+📌 Modelo Clássico
+
+Baseado em:
+
+Tendência linear, quadrática ou média
+
+Sazonalidade média histórica
+
+Intervalo de confiança via ruído estrutural
+
+📌 ARIMA (Resíduos)
+
+Modela o ruído do log da série depois de tirar tendência + sazonalidade.
+
+Com:
+
+ARIMA manual (p,d,q)
+
+OU otimização automática (grid + rolling-origin cross-validation)
+
+📌 Meta-Modelo ML (XGBoost)
+
+Utiliza:
+
+Lags de Y
+
+Lags do clássico e ARIMA
+
+Erros passados
+
+Deltas
+
+Features sazonais (sen/cos)
+
+Previsão recursiva sem vazamento
+
+🎨 Visualizações
+
+O app gera um gráfico master:
+
+Realizado (barras)
+
+Clássico (linha preta + banda de IC futuro)
+
+ARIMA (azul + banda de IC)
+
+ML (roxo)
+
+Corte (linha vertical vermelha)
+
+📘 Métricas
+➤ Período Completo
+
+MAPE (%)
+
+R²
+
+RMSE
+
+➤ Pós-Corte
+
+Mostra apenas meses cuja previsão realmente importa.
+
+🔁 Rolling Evaluation (Realista)
+
+O app implementa o rolling 1-step ahead, onde, para cada mês t:
+
+Treina o modelo usando apenas dados até t
+
+Prevê t+1
+
+Guarda erro realista (sem vazamento)
+
+Disponível para:
+
+Clássico
+
+ARIMA
+
+ML (se ativado)
+
+Gera:
+
+MAPE médio
+
+Erro médio absoluto
+
+Gráfico por data de corte
+
+🧩 Interpretação Automática via LLM
+
+A aplicação monta um prompt consultivo analisando:
+
+Qual modelo performou melhor e por quê
+
+Leitura dos intervalos de confiança
+
+Comportamento pós-corte
+
+Explicação da Rolling Evaluation
+
+Insights estratégicos para o gestor
+
+O usuário pode anexar um PDF de contexto (opcional), e o texto será incorporado.
+
+📄 Exportação em PDF
+
+Gera um relatório completo contendo:
+
+Gráfico
+
+Métricas
+
+Interpretação do LLM
+
+Tabela resumo dos modelos
+
+PDF é totalmente formatado via reportlab.
+
+🛠️ Instalação
+
+Crie seu ambiente e instale as dependências:
+
+pip install -r requirements.txt
+
+▶️ Execução
+streamlit run Previsao_Vendas3.py
+
+📂 Estrutura Sugerida do Projeto
+📁 previsao-vendas
+│
+├── Previsao_Vendas3.py
+├── requirements.txt
+├── README.md
+└── exemplos/
+    └── base_vendas.xlsx
+
+⚙️ Requirements
+streamlit
+numpy
+pandas
+matplotlib
+scikit-learn
+statsmodels
+xgboost
+reportlab
+pymupdf
+openai
+python-dateutil

@@ -8,4 +8,5 @@ reportlab
 openpyxl
 PyMuPDF
 scikit-learn>=1
+openai>=1.0.0
 

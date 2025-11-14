@@ -1332,6 +1332,11 @@ st.pyplot(fig)
 # PREPARAÇÃO PARA CÁLCULO DAS MÉTRICAS
 # (deve ficar ANTES de calc_metrics e antes de chamar métricas)
 # ======================================================
+# ======================================================
+# 🔒 BLINDAGEM DEFINITIVA — renomeia antes de qualquer merge
+# ======================================================
+if "valor" in df_filial.columns and "alvo" not in df_filial.columns:
+    df_filial = df_filial.rename(columns={"valor": "alvo"})
 
 df_classico_valid = pd.merge(
     df_filial[['data','alvo']], 
@@ -1356,13 +1361,7 @@ if usar_ml:
 # 📐 MÉTRICAS — PRÉ e PÓS-CORTE — Todos os Modelos
 # ======================================================
 
-# ======================================================
-# 🔒 Blindagem — evitar NameError e merges quebrados
-# ======================================================
 
-# Se vier 'valor' ao invés de 'alvo'
-if "valor" in df_filial.columns and "alvo" not in df_filial.columns:
-    df_filial = df_filial.rename(columns={"valor": "alvo"})
 
 # Remover linhas sem 'alvo' nas validações (isso quebra métricas)
 df_classico_valid = df_classico_valid.dropna(subset=["alvo"])
@@ -1396,11 +1395,6 @@ m_class_pos = calc_metrics(df_classico_valid.loc[mask_pos,'alvo'],
 m_arima_pos = calc_metrics(df_arima_valid.loc[mask_pos,'alvo'],
                            df_arima_valid.loc[mask_pos,'previsao']) if mask_pos.any() else {'MAPE (%)':np.nan,'R²':np.nan,'RMSE':np.nan}
 
-if usar_ml:
-    df_valid_ml = df_prev_ml_full.merge(df_filial[['data','alvo']], on='data', how='inner')
-    m_ml_total = calc_metrics(df_valid_ml['alvo'], df_valid_ml['previsao'])
-else:
-    m_ml_total = None
 
 if usar_ml:
     df_valid_ml = df_prev_ml_full.merge(df_filial[['data','alvo']], on='data', how='inner')
@@ -1769,6 +1763,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

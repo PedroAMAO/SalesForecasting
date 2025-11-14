@@ -1329,100 +1329,80 @@ buf.seek(0)
 st.pyplot(fig)
 
 # ======================================================
-# PREPARAÇÃO PARA CÁLCULO DAS MÉTRICAS
-# (deve ficar ANTES de calc_metrics e antes de chamar métricas)
+# 📐 PREPARAÇÃO DAS SÉRIES PARA MÉTRICAS
 # ======================================================
-# ======================================================
-# 🔒 BLINDAGEM DEFINITIVA — renomeia antes de qualquer merge
-# ======================================================
+
+# 1) Blindagem — padroniza coluna alvo
 if "valor" in df_filial.columns and "alvo" not in df_filial.columns:
     df_filial = df_filial.rename(columns={"valor": "alvo"})
 
-df_classico_valid = pd.merge(
-    df_filial[['data','alvo']], 
-    df_prev_classico_full[['data','previsao']], 
-    on='data', how='inner'
+# 2) Montar dataframes alinhados (somente datas em comum)
+df_classico_valid = (
+    df_filial[['data', 'alvo']]
+    .merge(df_prev_classico_full[['data', 'previsao']], on='data', how='inner')
+    .dropna(subset=['alvo', 'previsao'])
+    .rename(columns={'previsao': 'prev_class'})
 )
 
-df_arima_valid = pd.merge(
-    df_filial[['data','alvo']], 
-    df_prev_arima_completo[['data','previsao']], 
-    on='data', how='inner'
+df_arima_valid = (
+    df_filial[['data', 'alvo']]
+    .merge(df_prev_arima_completo[['data', 'previsao']], on='data', how='inner')
+    .dropna(subset=['alvo', 'previsao'])
+    .rename(columns={'previsao': 'prev_arima'})
 )
 
+df_ml_valid = None
 if usar_ml:
-    df_ml_valid = pd.merge(
-        df_filial[['data','alvo']],
-        df_prev_ml_full[['data','previsao']],
-        on='data', how='inner'
+    df_ml_valid = (
+        df_filial[['data', 'alvo']]
+        .merge(df_prev_ml_full[['data', 'previsao']], on='data', how='inner')
+        .dropna(subset=['alvo', 'previsao'])
+        .rename(columns={'previsao': 'prev_ml'})
     )
 
-# ======================================================
-# 📐 MÉTRICAS — PRÉ e PÓS-CORTE — Todos os Modelos
-# ======================================================
-
-
-
-# Remover linhas sem 'alvo' nas validações (isso quebra métricas)
-df_classico_valid = df_classico_valid.dropna(subset=["alvo"])
-df_arima_valid = df_arima_valid.dropna(subset=["alvo"])
-
-# ML só deve ser tratado SE existir
-if usar_ml:
-    df_ml_valid = df_ml_valid.dropna(subset=["alvo"])
-else:
-    df_ml_valid = None
-
-st.markdown("## 📐 Métricas Comparativas dos Modelos")
-
-
-
-
-# --- Janelas ---
+# 3) Máscaras de período
 mask_obs = df_classico_valid['alvo'].notnull()
 mask_pos = df_classico_valid['data'] > data_corte
 
-# --- Métricas ---
-m_class_total = calc_metrics(df_classico_valid.loc[mask_obs,'alvo'],
-                             df_classico_valid.loc[mask_obs,'previsao'])
+# ======================================================
+# 📐 FUNÇÃO AUXILIAR PARA MÉTRICAS
+# ======================================================
+def metricas(df, col_pred, mask_total, mask_pos):
+    if df is None:
+        return None, None
+    m_total = calc_metrics(
+        df.loc[mask_total, 'alvo'],
+        df.loc[mask_total, col_pred],
+    )
+    m_pos = (
+        calc_metrics(
+            df.loc[mask_pos, 'alvo'],
+            df.loc[mask_pos, col_pred]
+        )
+        if mask_pos.any()
+        else {'MAPE (%)': np.nan, 'R²': np.nan, 'RMSE': np.nan}
+    )
+    return m_total, m_pos
 
-m_arima_total = calc_metrics(df_arima_valid.loc[mask_obs,'alvo'],
-                             df_arima_valid.loc[mask_obs,'previsao'])
-
-m_class_pos = calc_metrics(df_classico_valid.loc[mask_pos,'alvo'],
-                           df_classico_valid.loc[mask_pos,'previsao']) if mask_pos.any() else {'MAPE (%)':np.nan,'R²':np.nan,'RMSE':np.nan}
-
-m_arima_pos = calc_metrics(df_arima_valid.loc[mask_pos,'alvo'],
-                           df_arima_valid.loc[mask_pos,'previsao']) if mask_pos.any() else {'MAPE (%)':np.nan,'R²':np.nan,'RMSE':np.nan}
-
+# ======================================================
+# 📐 MÉTRICAS FINAIS
+# ======================================================
+m_class_total, m_class_pos = metricas(df_classico_valid, "prev_class", mask_obs, mask_pos)
+m_arima_total, m_arima_pos = metricas(df_arima_valid, "prev_arima", mask_obs, mask_pos)
 
 if usar_ml:
-    df_valid_ml = df_prev_ml_full.merge(df_filial[['data','alvo']], on='data', how='inner')
-
-    # total ML
-    m_ml_total = calc_metrics(df_valid_ml['alvo'], df_valid_ml['previsao'])
-
-    
-    # pós-corte ML
-    mask_obs_ml = df_valid_ml['alvo'].notnull()
-    mask_pos_ml = df_valid_ml['data'] > data_corte
-
-    if (mask_obs_ml & mask_pos_ml).any():
-        m_ml_pos = calc_metrics(
-            df_valid_ml.loc[mask_obs_ml & mask_pos_ml, 'alvo'],
-            df_valid_ml.loc[mask_obs_ml & mask_pos_ml, 'previsao']
-        )
-    else:
-        m_ml_pos = {'MAPE (%)': np.nan, 'R²': np.nan, 'RMSE': np.nan}
-
+    mask_obs_ml = df_ml_valid['alvo'].notnull()
+    mask_pos_ml = df_ml_valid['data'] > data_corte
+    m_ml_total, m_ml_pos = metricas(df_ml_valid, "prev_ml", mask_obs_ml, mask_pos_ml)
 else:
-    m_ml_total = None
-    m_ml_pos = None
+    m_ml_total, m_ml_pos = None, None
 
+# ======================================================
+# 🖥️ EXIBIÇÃO
+# ======================================================
+st.markdown("## 📐 Métricas Comparativas dos Modelos")
 
-# ======================
-# EXIBE MÉTRICAS — TOTAL
-# ======================
+# ----- TOTAL -----
 st.markdown("### 🟢 Período Completo")
 
 c1, c2, c3 = st.columns(3)
@@ -1441,9 +1421,7 @@ if usar_ml:
     c2.metric("ML — R²", f"{m_ml_total['R²']:.3f}")
     c3.metric("ML — RMSE", f"{m_ml_total['RMSE']:,.2f}")
 
-# ======================
-# EXIBE MÉTRICAS — PÓS-CORTE
-# ======================
+# ----- PÓS-CORTE -----
 st.markdown("### 🔴 Após o Corte")
 
 c1, c2, c3 = st.columns(3)
@@ -1461,7 +1439,6 @@ if usar_ml:
     c1.metric("ML — MAPE (%)", f"{m_ml_pos['MAPE (%)']:.2f}" if pd.notna(m_ml_pos['MAPE (%)']) else "—")
     c2.metric("ML — R²", f"{m_ml_pos['R²']:.3f}" if pd.notna(m_ml_pos['R²']) else "—")
     c3.metric("ML — RMSE", f"{m_ml_pos['RMSE']:,.2f}" if pd.notna(m_ml_pos['RMSE']) else "—")
-
 
 
 # ===============================
@@ -1763,6 +1740,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

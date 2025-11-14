@@ -1376,35 +1376,65 @@ mask_pos = df_classico_valid['data'] > data_corte
 # ======================================================
 # 📐 FUNÇÃO AUXILIAR PARA MÉTRICAS
 # ======================================================
-def metricas(df, col_pred, mask_total, mask_pos):
-    if df is None:
-        return None, None
+# def metricas(df, col_pred, mask_total, mask_pos):
+#     if df is None:
+#         return None, None
+#     m_total = calc_metrics(
+#         df.loc[mask_total, 'alvo'],
+#         df.loc[mask_total, col_pred],
+#     )
+#     m_pos = (
+#         calc_metrics(
+#             df.loc[mask_pos, 'alvo'],
+#             df.loc[mask_pos, col_pred]
+#         )
+#         if mask_pos.any()
+#         else {'MAPE (%)': np.nan, 'R²': np.nan, 'RMSE': np.nan}
+#     )
+#     return m_total, m_pos
+
+def metricas(df, col_pred, data_corte):
+    if df is None or df.empty:
+        vazio = {'MAPE (%)': np.nan, 'R²': np.nan, 'RMSE': np.nan}
+        return vazio, vazio
+
+    mask_total = df['alvo'].notnull() & df[col_pred].notnull()
+    mask_pos   = mask_total & (df['data'] > data_corte)
+
     m_total = calc_metrics(
         df.loc[mask_total, 'alvo'],
         df.loc[mask_total, col_pred],
     )
-    m_pos = (
-        calc_metrics(
+
+    if mask_pos.any():
+        m_pos = calc_metrics(
             df.loc[mask_pos, 'alvo'],
-            df.loc[mask_pos, col_pred]
+            df.loc[mask_pos, col_pred],
         )
-        if mask_pos.any()
-        else {'MAPE (%)': np.nan, 'R²': np.nan, 'RMSE': np.nan}
-    )
+    else:
+        m_pos = {'MAPE (%)': np.nan, 'R²': np.nan, 'RMSE': np.nan}
+
     return m_total, m_pos
 
 # ======================================================
 # 📐 MÉTRICAS FINAIS
 # ======================================================
-m_class_total, m_class_pos = metricas(df_classico_valid, "prev_class", mask_obs, mask_pos)
-m_arima_total, m_arima_pos = metricas(df_arima_valid, "prev_arima", mask_obs, mask_pos)
+m_class_total, m_class_pos = metricas(df_classico_valid, "prev_class", data_corte)
+m_arima_total, m_arima_pos = metricas(df_arima_valid, "prev_arima", data_corte)
 
 if usar_ml:
-    mask_obs_ml = df_ml_valid['alvo'].notnull()
-    mask_pos_ml = df_ml_valid['data'] > data_corte
-    m_ml_total, m_ml_pos = metricas(df_ml_valid, "prev_ml", mask_obs_ml, mask_pos_ml)
+    m_ml_total, m_ml_pos = metricas(df_ml_valid, "prev_ml", data_corte)
 else:
     m_ml_total, m_ml_pos = None, None
+# m_class_total, m_class_pos = metricas(df_classico_valid, "prev_class", mask_obs, mask_pos)
+# m_arima_total, m_arima_pos = metricas(df_arima_valid, "prev_arima", mask_obs, mask_pos)
+
+# if usar_ml:
+#     mask_obs_ml = df_ml_valid['alvo'].notnull()
+#     mask_pos_ml = df_ml_valid['data'] > data_corte
+#     m_ml_total, m_ml_pos = metricas(df_ml_valid, "prev_ml", mask_obs_ml, mask_pos_ml)
+# else:
+#     m_ml_total, m_ml_pos = None, None
 
 # ======================================================
 # 🖥️ EXIBIÇÃO
@@ -1749,6 +1779,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

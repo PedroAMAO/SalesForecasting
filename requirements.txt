@@ -1,11 +1,10 @@
 streamlit
-numpy
 pandas
+numpy
 matplotlib
-scikit-learn
-statsmodels
 xgboost
+statsmodels
 reportlab
-pymupdf
-openai
-python-dateutil
+openpyxl
+PyMuPDF
+scikit-learn

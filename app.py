@@ -391,8 +391,7 @@ def calc_metrics(y_true, y_pred):
     return {
         'MAPE (%)': mean_absolute_percentage_error(y_true, y_pred) * 100.0,
         'R²': r2_score(y_true, y_pred),
-        'RMSE': np.sqrt(mean_squared_error(y_true, y_pred))
-
+        'RMSE': mean_squared_error(y_true, y_pred, squared=False)
     }
 
 def safe_sheet_read(file):
@@ -1289,30 +1288,45 @@ ax.axvline(data_corte, linestyle='--', color='red', linewidth=2,
            label='Data de Corte', zorder=10)
 
 # ------------------------------------------------------
-# FORMATAÇÃO FINAL
+# 📌 FORMATAÇÃO PRELIMINAR
 # ------------------------------------------------------
 ax.set_title(f"📈 Comparativo de Modelos — Filial {filial}", fontsize=16)
 ax.set_xlabel("Data")
 ax.set_ylabel("Vendas" if not is_share else "Participação (%)")
 ax.legend()
 
+# =========================================================
+# 🔧 AJUSTE AUTOMÁTICO DO EIXO Y (40% ABAIXO DO MENOR VALOR)
+# =========================================================
+valores_min = []
 
+# previsões
+valores_min.append(df_prev_classico_full['previsao'].min())
+valores_min.append(df_prev_arima_completo['previsao'].min())
+
+if usar_ml:
+    valores_min.append(df_prev_ml_full['previsao'].min())
+
+# histórico (alvo real)
+valores_min.append(df_filial['alvo'].min())
+
+# menor valor geral
+vmin = min(valores_min)
+
+# aplica o desconto de 40%
+limite_inferior = vmin * 0.95
+ax.set_ylim(bottom=limite_inferior)
+
+# =========================================================
+# SALVAR EM PNG (IMPORTANTE: *DEPOIS* DO AJUSTE DE EIXO)
+# =========================================================
 buf = io.BytesIO()
 fig.savefig(buf, format="png", dpi=300, bbox_inches="tight")
 buf.seek(0)
 
-
+# renderiza no streamlit
 st.pyplot(fig)
 
-
-
-
-
-# somente datas observadas (histórico)
-df_classico_valid = pd.merge(df_filial[['data','alvo']], 
-                             df_prev_classico_full[['data','previsao']], on='data', how='inner')
-df_arima_valid = pd.merge(df_filial[['data','alvo']], 
-                          df_prev_arima_completo[['data','previsao']], on='data', how='inner')
 
 # ======================================================
 # 📐 MÉTRICAS — PRÉ e PÓS-CORTE — Todos os Modelos
@@ -1709,5 +1723,4 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
-
 

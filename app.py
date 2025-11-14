@@ -388,12 +388,23 @@ def extract_context_text(context_file):
 
 
 def calc_metrics(y_true, y_pred):
+    # garante arrays 1D lisinhos
+    y_true = np.array(y_true).ravel()
+    y_pred = np.array(y_pred).ravel()
+
+    mape = mean_absolute_percentage_error(y_true, y_pred) * 100.0
+    r2   = r2_score(y_true, y_pred)
+
+    # ⚠️ sklearn antigo NÃO aceita squared=False → calculamos RMSE “na mão”
+    mse  = mean_squared_error(y_true, y_pred)
+    rmse = np.sqrt(mse)
+
     return {
-        'MAPE (%)': mean_absolute_percentage_error(y_true, y_pred) * 100.0,
-        'R²': r2_score(y_true, y_pred),
-        #'RMSE': mean_squared_error(y_true, y_pred, squared=False)
-        'RMSE': mean_squared_error(y_true, y_pred, squared=False)
+        'MAPE (%)': mape,
+        'R²': r2,
+        'RMSE': rmse
     }
+
 
 def safe_sheet_read(file):
     """Tenta ler 'Planilha1'; se não existir, pega a primeira aba."""
@@ -1740,6 +1751,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

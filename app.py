@@ -1,92 +1,42 @@
-import streamlit as st
-import pandas as pd
+# ===============================================
+# 📈 Previsão com Decomposição + ARIMA (versão enxuta e robusta)
+# ===============================================
+import os, warnings, re
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.metrics import r2_score
-from sklearn.neural_network import MLPRegressor
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import LinearRegression, BayesianRidge
-import xgboost as xgb  
-from sklearn.ensemble import VotingRegressor
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.neighbors import KNeighborsRegressor
-from sklearn.model_selection import RandomizedSearchCV
-from statsmodels.tsa.arima.model import ARIMA
-from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
+import streamlit as st
+import io
 from itertools import product
-import warnings
-from statsmodels.tsa.stattools import adfuller
-from scipy.fft import fft
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-from sklearn.svm import SVC
-from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.neural_network import MLPClassifier
-from sklearn.ensemble import VotingClassifier
-from sklearn.linear_model import LogisticRegression
-from xgboost import XGBClassifier
-from sklearn.ensemble import StackingClassifier
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.model_selection import GridSearchCV
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-import os
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score, mean_absolute_percentage_error, mean_squared_error
+from sklearn.model_selection import train_test_split
+from statsmodels.tsa.arima.model import ARIMA
+import base64
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import cm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+from xgboost import XGBRegressor
 
-os.environ["OMP_NUM_THREADS"] = "1"  # Para OpenMP
+
+
+
+
+# 🔒 Limita threads (evita travamentos em alguns ambientes)
+os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
-
-
-
-
 warnings.filterwarnings("ignore")
-
-
-#dicionario de hiperparametros
-param_grids = {
-    "Random Forest": {
-        "n_estimators": [50, 100, 200, 500],
-        "max_depth": [None, 5, 10, 20, 30],
-        "min_samples_split": [2, 5, 10],
-        "min_samples_leaf": [1, 2, 4]
-    },
-    "Bayesian Ridge": {
-        "alpha_1": [1e-6, 1e-5, 1e-4],
-        "lambda_1": [1e-6, 1e-5, 1e-4]
-    },
-    "MLP": {
-        "hidden_layer_sizes": [(4,), (8,), (16,), (8,8) ,(16,4), (32,16,8), (16,8,4,2),  (64,32,16,8), (128,64,32,16,8)],
-        "alpha": [0.0001, 0.001, 0.01],
-        "learning_rate_init": [0.001, 0.01, 0.1],
-        "activation": ["relu", "tanh", "logistic", "identity"],  # <-- incluído
-        "max_iter": [10000]
-    },
-    "XGBoost": {
-        "n_estimators": [50, 100, 200,500],
-        "max_depth": [3, 5, 7, 10],
-        "learning_rate": [0.01, 0.1, 0.3]
-    },
-    "Decision Tree": {
-        "max_depth": [None, 5, 10, 20],
-        "min_samples_split": [2, 5, 10],
-        "min_samples_leaf": [1, 2, 4]
-    },
-    "K-Nearest Neighbors": {
-        "n_neighbors": [3, 5, 7, 9, 15],
-        "weights": ["uniform", "distance"]
-    }
-}
-
-
-
-# Configuração inicial do Streamlit
 st.set_page_config(layout="wide")
 
-# CSS personalizado para melhor visualização
+# ===============================
+# UI / CSS
+# ===============================
 st.markdown("""
     <style>
         .main { padding: 2rem 5rem; }
@@ -94,1452 +44,1667 @@ st.markdown("""
         html, body { font-size: 18px; }
     </style>
 """, unsafe_allow_html=True)
-
-# Título principal
 st.title("📈 Previsão com Decomposição Log + Tendência + Sazonalidade")
 
-# Upload do Excel
-arquivo = st.file_uploader("📤 Faça upload do Excel de vendas", type="xlsx")
+# ===============================
+# Utils
+# ===============================
+def prever_full_classico(modelo_classico, df_filial):
+    """Gera previsão clássica (tend + saz + IC) somente no histórico."""
+    prevs = []
+    for _, row in df_filial.iterrows():
+        t_i = int(row["t"])
+        m_i = int(row["mes_num"])
+        y, ic_inf, ic_sup, _ = modelo_classico.prever_nivel_com_ic(t_i, m_i)
+        prevs.append({
+            "data": row["data"],
+            "previsao": y,
+            "ic_inf": ic_inf,
+            "ic_sup": ic_sup,
+        })
+    return pd.DataFrame(prevs)
 
-# Instruções detalhadas
-if not arquivo:
-    st.markdown("""
-        <div style='margin-top: 2rem; font-size: 18px;'>
-            🔍 <b>Instruções:</b><br>
-            - Faça upload de um arquivo Excel (.xlsx) com a aba <code>Planilha1</code><br>
-            - Colunas necessárias: <code>ano</code>, <code>mês</code>, <code>Filial</code>, <code>Realizado</code><br>
-            - Após o upload, selecione a filial e a data de corte 🎯
-        </div>
-    """, unsafe_allow_html=True)
+def prever_full_arima(modelo_classico, modelo_arima, df_filial):
+    """Reconstrói previsão ARIMA (A+B) somente no histórico observado."""
+    serie_residuo = modelo_arima.modelo.fittedvalues  # só A
+    n_hist = len(df_filial)
 
-# Executar após upload
-# Executar após upload
-if arquivo:
-    # Carregar dados
-    df = pd.read_excel(arquivo, sheet_name='Planilha1')
-    
-    df = df.iloc[:, :4]  # mantém só as 4 primeiras colunas
-    
-    df['data'] = pd.to_datetime(df['ano'].astype(str) + '-' + df['mês'].astype(str) + '-01')
-    #print(df.head())
+    # Como ARIMA só tem previsões do período A, usamos apenas fitted
+    # e completamos com forecast até completar o histórico (B)
+    passos_faltando = n_hist - len(serie_residuo)
 
-    # Agrupa por ano e mês e soma o Realizado
-    df_total = df.groupby(['data'], as_index=False)['Realizado'].sum()
-    
-
-    # Marca como "Total" na coluna Filial
-    df_total['Filial'] = 'Total'
-
-    # Garante a mesma ordem das colunas
-    #df_total = df_total[['ano', 'mês', 'Filial', 'Realizado']]
-
-    # Junta com o DataFrame original
-    df_com_total = pd.concat([df, df_total], ignore_index=True)
-
-    #Calculo do Share por filial
-
-    #adiciona a Coluna Share por filial por data
-    #df_com_total['total_por_data'] = df_com_total.groupby('data')['Realizado'].transform('sum')
-    df_com_total['total_por_data'] = (
-        df_com_total[df_com_total['Filial'] != 'Total']
-        .groupby('data')['Realizado']
-        .transform('sum')
-    )   
-    df_com_total['pct_filial'] = df_com_total['Realizado'] / df_com_total['total_por_data']
-
-
-    # Selecionar Reais ou Share
-    modelo_realizado = st.selectbox("🏬 Selecione o realizado", ['Real R$', 'Real Share %'])
-
-
-    # Selecionar filial
-    
-    # Filtra lista de filiais conforme o modelo selecionado
-    if modelo_realizado == 'Real Share %':
-        filiais_disponiveis = sorted(df_com_total[df_com_total['Filial'] != 'Total']['Filial'].unique())
+    if passos_faltando > 0:
+        futuros_B = modelo_arima.modelo.forecast(steps=passos_faltando)
+        ruido_total = pd.concat([serie_residuo, futuros_B])
     else:
-        filiais_disponiveis = sorted(df_com_total['Filial'].unique())
+        ruido_total = serie_residuo
 
-    # Selecionar filial
-    filial = st.selectbox("🏬 Selecione a filial", filiais_disponiveis)
-    df_filial = df_com_total[df_com_total['Filial'] == filial].sort_values('data').reset_index(drop=True)
-    #print(df_filial.head())
-    # Escolher data de corte
-    datas = df_filial['data'].tolist()
-    data_corte = st.select_slider("📅 Data de corte para previsão", options=datas, value=datas[-4])
+    ruido_total = ruido_total.reset_index(drop=True)
 
-    # Variáveis auxiliares
-    df_filial['t'] = np.arange(len(df_filial))
-    df_filial['mes'] = df_filial['data'].dt.month
+    prevs = []
+    for idx, row in df_filial.iterrows():
+        t_i = int(row["t"])
+        m_i = int(row["mes_num"])
 
-    #Incluir Total (Somatorio filiais)
+        tend_saz_log = modelo_classico.prever_log(t_i, m_i)
+        ruido_i = float(ruido_total.iloc[idx])
+
+        yhat_log = tend_saz_log + ruido_i
+
+        prevs.append({
+            "data": row["data"],
+            "previsao": np.exp(yhat_log) - 1.0,
+            "yhat_log": yhat_log
+        })
+
+    return pd.DataFrame(prevs)
+
+
+def rolling_ml(df_filial, tipo_tendencia, arima_order, lag_window=6, janela_minima=12):
+    resultados = []
+    datas = df_filial['data'].unique()
+
+    for i in range(janela_minima, len(datas)-1):
+        data_corte = datas[i]
+        data_target = data_corte + pd.DateOffset(months=1)
+
+        if data_target not in df_filial['data'].values:
+            continue
+
+        # 1) clássico até o corte
+        modelo_classico, df_treino, _ = treinar_modelo_classico(
+            df_filial, data_corte, tipo_tendencia
+        )
+
+        # 2) ARIMA nos resíduos até o corte
+        modelo_arima = treinar_arima_ruido(df_treino, arima_order)
+
+        # 3) treinar ML até o corte (idêntico ao gráfico)
+        modelo_ml_obj = treinar_modelo_ml(
+            df_filial=df_filial,
+            df_prev_classico_full=prever_full_classico(modelo_classico, df_filial),
+            df_prev_arima_completo=prever_full_arima(modelo_classico, modelo_arima, df_filial),
+            data_corte=data_corte,
+            lag_window=lag_window
+        )
+
+        # 4) prever o mês seguinte
+        df_prev_ml_full = prever_ml(
+            modelo_ml_obj,
+            df_filial,
+            prever_full_classico(modelo_classico, df_filial),
+            prever_full_arima(modelo_classico, modelo_arima, df_filial),
+            data_corte,
+            meses_a_frente=1
+        )
+
+        y_pred = df_prev_ml_full.loc[
+            df_prev_ml_full["data"] == data_target, "previsao"
+        ].values[0]
+
+        y_real = df_filial.loc[df_filial['data'] == data_target, 'alvo'].values[0]
+
+        erro_abs = abs(y_real - y_pred)
+        erro_pct = erro_abs / max(1e-6, y_real)
+
+        resultados.append({
+            "data_corte": data_corte,
+            "data_prev": data_target,
+            "real": y_real,
+            "prev": y_pred,
+            "erro_abs": erro_abs,
+            "erro_pct": erro_pct,
+        })
+
+    return pd.DataFrame(resultados)
+
+def rolling_arima(df_filial, tipo_tendencia, arima_order, janela_minima=12):
+    resultados = []
+    datas = df_filial['data'].unique()
+
+    for i in range(janela_minima, len(datas)-1):
+        data_corte = datas[i]
+        data_target = data_corte + pd.DateOffset(months=1)
+
+        if data_target not in df_filial['data'].values:
+            continue
+
+        # treina modelo clássico
+        modelo_classico, df_treino, _ = treinar_modelo_classico(
+            df_filial, data_corte, tipo_tendencia
+        )
+
+        # treina ARIMA nos resíduos — igual ao gráfico
+        modelo_arima = treinar_arima_ruido(df_treino, arima_order)
+
+        # t/mês do mês seguinte
+        t_next = int(df_filial.loc[df_filial['data'] == data_target, 't'].values[0])
+        mes_next = int(data_target.month)
+
+        # previsão estrutural (tend + saz) do próximo mês
+        yhat_log = modelo_classico.prever_log(t_next, mes_next)
+
+        # previsão ARIMA h=1
+        ruido_prev = modelo_arima.modelo.forecast(steps=1).iloc[0]
+
+        y_pred = np.exp(yhat_log + ruido_prev) - 1.0
+        y_real = df_filial.loc[df_filial['data'] == data_target, 'alvo'].values[0]
+
+        erro_abs = abs(y_real - y_pred)
+        erro_pct = erro_abs / max(1e-6, y_real)
+
+        resultados.append({
+            "data_corte": data_corte,
+            "data_prev": data_target,
+            "real": y_real,
+            "prev": y_pred,
+            "erro_abs": erro_abs,
+            "erro_pct": erro_pct,
+        })
+
+    return pd.DataFrame(resultados)
+def rolling_classico(df_filial, tipo_tendencia, janela_minima=12):
+    resultados = []
+    datas = df_filial['data'].unique()
+
+    for i in range(janela_minima, len(datas)-1):
+        data_corte = datas[i]
+        data_target = data_corte + pd.DateOffset(months=1)
+
+        # não existe realizado → pula
+        if data_target not in df_filial['data'].values:
+            continue
+
+        # treina o modelo clássico exatamente como no gráfico
+        modelo_classico, df_treino, _ = treinar_modelo_classico(
+            df_filial, data_corte, tipo_tendencia
+        )
+
+        t_next = int(df_filial.loc[df_filial['data'] == data_target, 't'].values[0])
+        mes_next = int(data_target.month)
+
+        y_pred, _, _, _ = modelo_classico.prever_nivel_com_ic(t_next, mes_next)
+        y_real = df_filial.loc[df_filial['data'] == data_target, 'alvo'].values[0]
+
+        erro_abs = abs(y_real - y_pred)
+        erro_pct = erro_abs / max(1e-6, y_real)
+
+        resultados.append({
+            "data_corte": data_corte,
+            "data_prev": data_target,
+            "real": y_real,
+            "prev": y_pred,
+            "erro_abs": erro_abs,
+            "erro_pct": erro_pct,
+        })
+
+    return pd.DataFrame(resultados)
+
+
+def rolling_eval(df_filial, modelo, meses_a_frente=1, janela_minima=12):
+    """
+    Avalia um modelo prevendo 1 mês à frente em vários cortes.
+    df_filial      -> DataFrame da filial (data, alvo)
+    modelo         -> função que recebe (df, data_corte) e devolve previsão do próximo mês
+    """
+    resultados = []
+    datas = df_filial['data'].unique()
+
+    for i in range(janela_minima, len(datas) - meses_a_frente):
+        data_corte = datas[i]
+
+        # data do target (mês seguinte)
+        data_target = data_corte + pd.DateOffset(months=meses_a_frente)
+
+        # Se não existe realizado do target, pula
+        if data_target not in df_filial['data'].values:
+            continue
+
+        y_real = df_filial.loc[df_filial['data'] == data_target, 'alvo'].values[0]
+
+        # chama o modelo (Clássico, ARIMA ou ML)
+        try:
+            y_pred = modelo(df_filial, data_corte)
+        except:
+            continue
+
+        erro_abs = abs(y_real - y_pred)
+        erro_pct = erro_abs / max(1e-6, y_real)
+
+        resultados.append({
+            "data_corte": data_corte,
+            "data_prev": data_target,
+            "real": y_real,
+            "prev": y_pred,
+            "erro_abs": erro_abs,
+            "erro_pct": erro_pct,
+        })
+
+    return pd.DataFrame(resultados)
+
+
+
+def gerar_pdf_completo(
+    filial,
+    m_class_total, m_arima_total, m_ml_total,
+    m_class_pos, m_arima_pos, m_ml_pos,
+    relatorio_llm,
+    grafico_png
+):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4,
+                            rightMargin=2*cm, leftMargin=2*cm,
+                            topMargin=2*cm, bottomMargin=2*cm)
+
+    styles = getSampleStyleSheet()
+    story = []
+
+    # =============================
+    # TÍTULO
+    # =============================
+    story.append(Paragraph(f"<b>Relatório de Previsão — Filial {filial}</b>", styles["Title"]))
+    story.append(Spacer(1, 0.4*cm))
+
+    # =============================
+    # IMAGEM DO GRÁFICO
+    # =============================
+    img_buf = io.BytesIO(grafico_png)
+    story.append(Image(img_buf, width=16*cm, height=7*cm))
+    story.append(Spacer(1, 0.6*cm))
+
+    # =============================
+    # MÉTRICAS (Tabela)
+    # =============================
+    dados_tabela = [
+        ["Modelo", "MAPE (%)", "R²", "RMSE"],
+        ["Clássico", f"{m_class_total['MAPE (%)']:.2f}", f"{m_class_total['R²']:.3f}", f"{m_class_total['RMSE']:.2f}"],
+        ["ARIMA",   f"{m_arima_total['MAPE (%)']:.2f}", f"{m_arima_total['R²']:.3f}", f"{m_arima_total['RMSE']:.2f}"],
+    ]
+
+    if m_ml_total:
+        dados_tabela.append(
+            ["ML", f"{m_ml_total['MAPE (%)']:.2f}", f"{m_ml_total['R²']:.3f}", f"{m_ml_total['RMSE']:.2f}"]
+        )
+
+    tabela = Table(dados_tabela)
+    tabela.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+        ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+        ('ALIGN', (1,1), (-1,-1), 'CENTER')
+    ]))
+    story.append(tabela)
+    story.append(Spacer(1, 0.8*cm))
+
+    # =============================
+    # RELATÓRIO DA LLM
+    # =============================
+    story.append(Paragraph("<b>Interpretação Automática (LLM)</b>", styles["Heading2"]))
+    for par in relatorio_llm.split("\n"):
+        if par.strip():
+            story.append(Paragraph(par.strip(), styles["BodyText"]))
+            story.append(Spacer(1, 0.25*cm))
+
+    doc.build(story)
+    pdf_value = buffer.getvalue()
+    buffer.close()
+    return pdf_value
+
+
+
+def extract_context_text(context_file):
+    import pandas as pd
+    import io
     
 
+    filename = context_file.name.lower()
 
-    # Dados de treino até data de corte
-    df_treino = df_filial[df_filial['data'] <= data_corte].copy()
-    df_treino['log_venda'] = np.log(df_treino['Realizado'] + 1)
+    # TXT
+    if filename.endswith(".txt"):
+        return context_file.read().decode("utf-8")
 
-    df_real = df_filial[df_filial['Realizado'].notnull()].copy()
-    
-    df_real['log_venda'] = np.log(df_real['Realizado'] + 1)
-
-
-
-    if modelo_realizado =='Real Share %':
-        df_treino['log_venda'] = np.log(df_treino['pct_filial']+1)
-        df_real['log_venda'] = np.log(df_real['pct_filial']+1)
-        df_filial['log_venda'] = np.log(df_filial['pct_filial']+1)
-        df_treino['Realizado'] = df_treino['pct_filial']
-        df_real['Realizado'] = df_real['pct_filial']
-        df_filial['Realizado'] = df_filial['pct_filial']
-    
-    
-    #cálculo da media
-    media_realizado =  df_treino['log_venda'].mean()
-    
-    
-
-
-    # Seleção do modelo de tendência
-    tipo_tendencia = st.selectbox("📈 Tipo de Tendência", ["Linear", "Quadrática", "Média"])
+    # PDF
+    if filename.endswith(".pdf"):
+        import fitz   # PyMuPDF
+        doc = fitz.open(stream=context_file.read(), filetype="pdf")
+        text = ""
+        for page in doc:
+            text += page.get_text()
+        return text
 
     
-    def prever_tendencia_individual(t_i):
-        if tipo_tendencia == "Média":
-            return 0  # sem tendência, a média já vai entrar no lugar da estrutura
-        elif "Quadrática" in tipo_tendencia:
-            x_input = np.array([[t_i, t_i**2]])
+    # CSV
+    if filename.endswith(".csv"):
+        df = pd.read_csv(context_file)
+        return df.to_string()
+
+    # XLSX
+    if filename.endswith(".xlsx"):
+        xls = pd.ExcelFile(context_file)
+        df = xls.parse(xls.sheet_names[0])
+        return df.to_string()
+
+    return ""
+
+
+def calc_metrics(y_true, y_pred):
+    return {
+        'MAPE (%)': mean_absolute_percentage_error(y_true, y_pred) * 100.0,
+        'R²': r2_score(y_true, y_pred),
+        'RMSE': mean_squared_error(y_true, y_pred, squared=False)
+    }
+
+def safe_sheet_read(file):
+    """Tenta ler 'Planilha1'; se não existir, pega a primeira aba."""
+    try:
+        xl = pd.ExcelFile(file)
+        sheet = 'Planilha1' if 'Planilha1' in xl.sheet_names else xl.sheet_names[0]
+        df = xl.parse(sheet)
+    except Exception:
+        # fallback direto
+        df = pd.read_excel(file)
+    return df
+
+def normalize_columns(df):
+    cols = {c: c.strip().lower() for c in df.columns}
+    df = df.rename(columns=cols)
+    # suporta 'mês' ou 'mes'
+    if 'mês' in df.columns and 'mes' not in df.columns:
+        df = df.rename(columns={'mês': 'mes'})
+    # padroniza nomes esperados
+    rename_map = {}
+    if 'ano' not in df.columns:
+        # tenta achar algo parecido
+        for c in df.columns:
+            if c.startswith('ano'):
+                rename_map[c] = 'ano'
+    if 'filial' not in df.columns:
+        for c in df.columns:
+            if 'filial' in c:
+                rename_map[c] = 'filial'
+    if 'realizado' not in df.columns:
+        for c in df.columns:
+            if 'realiz' in c:
+                rename_map[c] = 'realizado'
+    df = df.rename(columns=rename_map)
+    missing = [c for c in ['ano','mes','filial','realizado'] if c not in df.columns]
+    if missing:
+        raise ValueError(f"Colunas faltando: {missing}. Esperado: ano, mês/mes, Filial, Realizado")
+    return df
+
+def to_month_start_date(ano, mes):
+    try:
+        ano = int(ano)
+        mes = int(mes)
+        return pd.to_datetime(f"{ano}-{mes:02d}-01")
+    except Exception:
+        return pd.NaT
+
+def clip_predictions(df, is_share):
+    if is_share:
+        return df.assign(
+            previsao=np.clip(df['previsao'], 0.0, 1.0),
+            ic_inf=np.clip(df['ic_inf'], 0.0, 1.0),
+            ic_sup=np.clip(df['ic_sup'], 0.0, 1.0)
+        )
+    else:
+        return df.assign(
+            previsao=np.clip(df['previsao'], 0.0, None),
+            ic_inf=np.clip(df['ic_inf'], 0.0, None),
+            ic_sup=np.clip(df['ic_sup'], 0.0, None)
+        )
+
+def parse_arima_order(s):
+    s = s.strip()
+    m = re.match(r'^\s*\(?\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)?\s*$', s)
+    if not m:
+        raise ValueError("Formato inválido. Use p,d,q (ex: 1,0,0).")
+    return tuple(map(int, m.groups()))
+
+# ============================================================
+# 🎯 MODELO CLÁSSICO (Tendência + Sazonalidade Média)
+# ============================================================
+class ClassicalTrendSeasonalModel:
+    def __init__(self, tipo_tendencia, media_log, modelo_tend, saz_media, sigma_ruido):
+        self.tipo_tendencia = tipo_tendencia
+        self.media_log = media_log
+        self.modelo_tend = modelo_tend  # pode ser None se "Média"
+        self.saz_media = saz_media      # Series indexada por mês
+        self.sigma_ruido = sigma_ruido  # desvio do ruído no log
+
+    def prever_log(self, t_i, mes_num):
+        """Retorna previsão em log (tendência + sazonalidade)."""
+        # Tendência
+        if self.tipo_tendencia == "Média":
+            tend_i = self.media_log
         else:
-            x_input = np.array([[t_i]])
-        return modelo_tendencia.predict(x_input)[0]
+            if self.tipo_tendencia == "Quadrática":
+                x = np.array([[t_i, t_i**2]])
+            else:
+                x = np.array([[t_i]])
+            tend_i = float(self.modelo_tend.predict(x)[0])
 
-    # Y: sempre log
-    y_treino = df_treino['log_venda']
+        # Sazonalidade
+        saz_i = float(self.saz_media.get(mes_num, 0.0))
+        return tend_i + saz_i
 
-   # Novo cálculo com base em TODO o período realizado
-    
+    def prever_nivel_com_ic(self, t_i, mes_num):
+        """
+        Retorna: previsão no nível, ic_inf, ic_sup, yhat_log.
+        """
+        yhat_log = self.prever_log(t_i, mes_num)
+        y = np.exp(yhat_log) - 1.0
+        ic_inf = np.exp(yhat_log - 2.57 * self.sigma_ruido) - 1.0
+        ic_sup = np.exp(yhat_log + 2.57 * self.sigma_ruido) - 1.0
+        return y, ic_inf, ic_sup, yhat_log
 
 
-    
-    
+def treinar_modelo_classico(df_filial, data_corte, tipo_tendencia):
+    """
+    Treina o modelo clássico (tendência + sazonalidade) até a data de corte.
+    Retorna:
+        modelo_classico  -> objeto ClassicalTrendSeasonalModel
+        df_treino        -> base até o corte (já com residuo/ruido)
+        df_real          -> base completa (se quiser usar depois)
+    """
+    df_treino = df_filial[df_filial['data'] <= data_corte].copy()
+    df_real = df_filial.copy()
 
+    # log sempre positivo (protege zero)
+    df_treino['log_venda'] = np.log(df_treino['alvo'] + 1.0)
+    df_real['log_venda'] = np.log(df_real['alvo'] + 1.0)
 
+    media_log = df_treino['log_venda'].mean()
 
-    # Exibição do histograma
-    
-
-
-    
-    
-    # Modelo de tendência (Regressão Linear)
-
-    # Prepara X de acordo com o tipo
+    # ---------------------------
+    # Tendência
+    # ---------------------------
+    modelo_tend = None
     if tipo_tendencia == "Média":
-        tendencia = media_realizado 
-        tendencia_real =  media_realizado
+        tendencia_train = np.full(len(df_treino), media_log)
     else:
-        X_treino = df_treino[['t']].copy()
-
-
+        X_tr = pd.DataFrame({'t': df_treino['t'].values})
         if tipo_tendencia == "Quadrática":
-            X_treino['t2'] = X_treino['t'] ** 2
+            X_tr['t2'] = X_tr['t']**2
 
-       
-        # Ajusta modelo
-        X_treino_split, X_teste_split, y_treino_split, y_teste_split = train_test_split(X_treino, y_treino, test_size=0.3, random_state=42)
+        modelo_tend = LinearRegression().fit(X_tr, df_treino['log_venda'])
+        tendencia_train = modelo_tend.predict(X_tr)
 
-        modelo_tendencia = LinearRegression().fit(X_treino_split, y_treino_split)
-        tendencia = modelo_tendencia.predict(X_treino)
-
-        
-     
-
-        # Reaplica o modelo de tendência (mesmo modelo treinado antes)
-        X_real = df_real[['t']].copy()
-        if "Quadrática" in tipo_tendencia:
-            X_real['t2'] = X_real['t'] ** 2
-
-        tendencia_real = modelo_tendencia.predict(X_real)
-
-
-        
-
-    # Salva resíduos
-    df_treino['residuo'] = y_treino - tendencia
-    df_real['residuo'] = df_real['log_venda'] - tendencia_real
-    
+    # ---------------------------
     # Sazonalidade média
-    
+    # ---------------------------
+    df_treino['residuo'] = df_treino['log_venda'] - tendencia_train
+
     if tipo_tendencia != "Média":
-        media_sazonal_treino = df_treino.groupby('mes')['residuo'].mean()
+        saz_media = df_treino.groupby(df_treino['data'].dt.month)['residuo'].mean()
     else:
-        media_sazonal_treino = pd.Series(0, index=range(1,13))
+        saz_media = pd.Series(0.0, index=range(1, 13))
 
-    df_real['ruido'] = df_real['residuo'] - df_real['mes'].map(media_sazonal_treino)
-    df_treino['ruido'] = df_treino['residuo'] - df_treino['mes'].map(media_sazonal_treino)
-    # Calcula o desvio padrão do ruído no total
-    sigma_ruido = df_treino['ruido'].std()
-
-    # Proteção anti-NaN
-    if pd.isna(sigma_ruido) or sigma_ruido == 0:
+    # ruído (residuo - sazonalidade)
+    df_treino['ruido'] = df_treino['residuo'] - df_treino['data'].dt.month.map(saz_media)
+    sigma_ruido = float(df_treino['ruido'].std())
+    if not np.isfinite(sigma_ruido) or sigma_ruido == 0:
         sigma_ruido = 1e-6
 
+    modelo_classico = ClassicalTrendSeasonalModel(
+        tipo_tendencia=tipo_tendencia,
+        media_log=media_log,
+        modelo_tend=modelo_tend,
+        saz_media=saz_media,
+        sigma_ruido=sigma_ruido
+    )
 
-    # Previsões históricas (dentro da base)
-    previsoes = []
-    for idx, row in df_filial.iterrows():
-        t_i = row['t']
-        mes_i = row['mes']
-        if tipo_tendencia == "Média":
-           tendencia_i = media_realizado
-        else:
-             
-            tendencia_i =  prever_tendencia_individual(t_i)
-
-        sazonal_i = media_sazonal_treino.get(mes_i, 0)
-        yhat_log = tendencia_i + sazonal_i
-        previsoes.append({
-            'data': row['data'],
-            'previsao': np.exp(yhat_log) - 1,
-            'ic_sup': np.exp(yhat_log + 2.57 * sigma_ruido) - 1,
-            'ic_inf': np.exp(yhat_log - 2.57 * sigma_ruido) - 1
-        })
-    df_prev = pd.DataFrame(previsoes)
-
-    # Avaliação do modelo após o corte
-    df_merged = pd.merge(df_filial, df_prev, on='data')
-    df_teste = df_merged[df_merged['Realizado'].notnull()].copy()
-   
-    
-
-    #aplicar ARIMA nos Residuos
-    # Série temporal dos resíduos (apenas dados até a data de corte)
-    #serie_residuo = df_treino.set_index('data')['residuo']
-
-    # Define ordem do ARIMA (ajuste fino depois)
-    
-    
-    # ⬛️ Checkbox para otimizar automaticamente
-    usar_otimizacao = st.checkbox("🔍 Otimizar parâmetros do ARIMA automaticamente", value=False)
-
-    # Se ativar, escolha a métrica
-    if usar_otimizacao:
-        metrica_label = st.selectbox("🎯 Métrica de otimização", ["R²", "MAPE"])
-        metrica_arima = 'r2' if metrica_label == "R²" else 'mape'
-
-    else:
-        ordem_arima = st.text_input("Ordem do ARIMA (p,d,q)", "1,0,0")
-        p, d, q = map(int, ordem_arima.split(','))
+    return modelo_classico, df_treino, df_real
 
 
-    def otimizar_arima(df_treino, df_filial, data_corte, media_sazonal_treino, prever_tendencia_individual, metrica='r2', grid_p=(0,1,2), grid_d=(0,1), grid_q=(0,1,2)):
-        melhores_resultados = []
+# ============================================================
+# 🔧 Helper — Modelo ARIMA encapsulado para o ruído
+# ============================================================
 
-        serie_residuo = df_treino.set_index('data')['residuo']
-        print(f"Série de resíduos: {len(serie_residuo)} pontos")
+class ArimaRuidoModel:
+    """
+    Wrap simples para manter o ARIMA ajustado nos resíduos.
+    """
+    def __init__(self, modelo, order, n_treino):
+        self.modelo = modelo     # modelo ARIMA do statsmodels já ajustado
+        self.order = order       # tupla (p,d,q)
+        self.n_treino = n_treino # quantidade de pontos no treino (útil em rolling)
 
-        for p, d, q in product(grid_p, grid_d, grid_q):
-            try:
-                modelo = ARIMA(serie_residuo, order=(p,d,q)).fit()
 
-                if modelo.nobs < max(p, d, q) + 1:
-                    print(f"❌ ARIMA({p},{d},{q}) descartado: poucos dados ({modelo.nobs})")
-                    continue
+def treinar_arima_ruido(df_treino, arima_order):
+    """
+    Ajusta um ARIMA nos resíduos do modelo clássico.
 
-                n_total = len(df_filial)
-                residuos_previstos = modelo.predict(start=0, end=n_total - 1)
+    df_treino deve conter:
+        data, ruido
 
-                if residuos_previstos.isna().any():
-                    print(f"❌ ARIMA({p},{d},{q}) descartado: previsão com NaNs")
-                    continue
+    arima_order é uma tupla (p,d,q)
 
-                datas = pd.date_range(start=df_filial['data'].iloc[0], periods=n_total, freq='MS')
-                previsoes = []
-                for t_i, data_i in enumerate(datas):
-                    mes_i = data_i.month
-                    if tipo_tendencia == "Média":
-                        tendencia_i = media_realizado
-                    else:
-             
-                        tendencia_i =  prever_tendencia_individual(t_i)
-                    #tendencia_i = prever_tendencia_individual(t_i)
-                    sazonal_i = media_sazonal_treino.get(mes_i, 0)
-                    ruido_i = residuos_previstos.iloc[t_i]
-                    yhat_log = tendencia_i + sazonal_i + ruido_i
-                    previsoes.append({'data': data_i, 'previsao': np.exp(yhat_log) - 1})
+    Retorna:
+        ArimaRuidoModel
+    """
 
-                df_prev = pd.DataFrame(previsoes)
-                df_merge = pd.merge(df_filial, df_prev, on='data')
-                df_valid = df_merge.dropna(subset=['Realizado', 'previsao'])
+    serie = df_treino.set_index("data")["ruido"].dropna()
 
-                if df_valid.empty:
-                    print(f"❌ ARIMA({p},{d},{q}) descartado: df_valid vazio após merge")
-                    continue
+    # Segurança mínima: impede ARIMA impossível
+    if len(serie) < sum(arima_order) + 3:
+        raise ValueError(
+            f"Poucos pontos ({len(serie)}) para treinar ARIMA com ordem {arima_order}"
+        )
 
-                y_true = df_valid['Realizado']
-                y_pred = df_valid['previsao']
+    modelo = ARIMA(serie, order=arima_order).fit()
 
-                if metrica == 'r2':
-                    score = r2_score(y_true, y_pred)
-                elif metrica == 'mape':
-                    score = mean_absolute_percentage_error(y_true, y_pred)
-                else:
-                    raise ValueError("Métrica inválida")
+    return ArimaRuidoModel(
+        modelo=modelo,
+        order=arima_order,
+        n_treino=len(serie)
+    )
 
-                print(f"✅ ARIMA({p},{d},{q}) score: {score:.4f}")
-                melhores_resultados.append({'p': p, 'd': d, 'q': q, 'score': score})
 
-            except Exception as e:
-                print(f"💥 Erro com ARIMA({p},{d},{q}): {e}")
+# ============================================================
+# 🔍 Otimização opcional do ARIMA via Rolling-Origin (cross-val)
+# ============================================================
+
+from itertools import product
+
+def otimizar_arima(df_treino,
+                   grid_p=range(0,3),
+                   grid_d=range(0,3),
+                   grid_q=range(0,3),
+                   metrica='mape',
+                   min_janela=12):
+    """
+    Rolling-Origin Cross-Validation 100% honesta.
+    Avalia previsões one-step-ahead da série de ruído do df_treino.
+
+    Retorna:
+        melhor -> dict {p,d,q,erro}
+        resultados -> lista de tentativas
+    """
+
+    serie = df_treino.set_index("data")["ruido"].dropna()
+    resultados = []
+
+    for p, d, q in product(grid_p, grid_d, grid_q):
+        try:
+            # precisa de pelo menos (p+d+q) + janela mínima
+            if len(serie) < max(p, d, q) + min_janela:
                 continue
 
-        if not melhores_resultados:
-            raise ValueError("Nenhum modelo ARIMA gerou previsões válidas.")
+            erros = []
 
-        if metrica == 'r2':
-            melhor = max(melhores_resultados, key=lambda x: x['score'])
-        else:
-            melhor = min(melhores_resultados, key=lambda x: x['score'])
+            # Rolling-origin
+            for corte_idx in range(min_janela, len(serie) - 1):
+                serie_treino = serie.iloc[:corte_idx]
+                verdadeiro = serie.iloc[corte_idx + 1]
 
-        return melhor, melhores_resultados
+                modelo_tmp = ARIMA(serie_treino, order=(p, d, q)).fit()
+                prev = modelo_tmp.forecast(steps=1).iloc[0]
+
+                if metrica == 'rmse':
+                    erro = (verdadeiro - prev) ** 2
+                else:  # mape-like: erro absoluto
+                    erro = abs(verdadeiro - prev)
+
+                erros.append(erro)
+
+            if erros:
+                resultados.append({
+                    'p': p,
+                    'd': d,
+                    'q': q,
+                    'erro': float(np.mean(erros))
+                })
+
+        except Exception:
+            continue
+
+    if not resultados:
+        raise ValueError("Nenhum ARIMA válido encontrado na validação rolling-origin.")
+
+    melhor = min(resultados, key=lambda x: x['erro'])
+    return melhor, resultados
+
+# ============================================================
+#  MACHINE LEARNING
+# ============================================================
 
 
+# ============================================================
+#  FUNÇÃO 1 — Build Lags (histórico até o corte)
+# ============================================================
+
+def build_lags(df_base, lag_window=6):
+    """
+    df_base deve conter:
+        data, alvo, prev_cl, prev_ar, t, mes_num
+    lag_window: Nº de lags (N)
+    Retorna:
+        df_feat  -> base com todas as features históricas
+        feature_cols -> lista das features para treinar o modelo ML
+    """
+
+    df = df_base.copy().sort_values("data").reset_index(drop=True)
+    feature_cols = []
+
+    # -------------------------
+    # 1. Lags de Y, Clássico, ARIMA
+    # -------------------------
+    for k in range(1, lag_window+1):
+        df[f"lag_y_{k}"]  = df["alvo"].shift(k)
+        df[f"lag_cl_{k}"] = df["prev_cl"].shift(k)
+        df[f"lag_ar_{k}"] = df["prev_ar"].shift(k)
+
+        feature_cols += [f"lag_y_{k}", f"lag_cl_{k}", f"lag_ar_{k}"]
+
+        # ---------- Erros ----------
+        df[f"err_cl_{k}"] = df[f"lag_y_{k}"] - df[f"lag_cl_{k}"]
+        df[f"err_ar_{k}"] = df[f"lag_y_{k}"] - df[f"lag_ar_{k}"]
+
+        feature_cols += [f"err_cl_{k}", f"err_ar_{k}"]
+
+    # -------------------------
+    # 2. Deltas (variações dentro da janela)
+    # -------------------------
+    for k in range(1, lag_window):
+        df[f"delta_y_{k}"] = df[f"lag_y_{k}"] - df[f"lag_y_{k+1}"]
+        df[f"delta_cl_{k}"] = df[f"lag_cl_{k}"] - df[f"lag_cl_{k+1}"]
+        df[f"delta_ar_{k}"] = df[f"lag_ar_{k}"] - df[f"lag_ar_{k+1}"]
+
+        df[f"delta_err_cl_{k}"] = df[f"err_cl_{k}"] - df[f"err_cl_{k+1}"]
+        df[f"delta_err_ar_{k}"] = df[f"err_ar_{k}"] - df[f"err_ar_{k+1}"]
+
+        feature_cols += [
+            f"delta_y_{k}", f"delta_cl_{k}", f"delta_ar_{k}",
+            f"delta_err_cl_{k}", f"delta_err_ar_{k}"
+        ]
+
+    # -------------------------
+    # 3. Features contemporâneas
+    # -------------------------
+    df["feat_prev_cl_t"] = df["prev_cl"]
+    df["feat_prev_ar_t"] = df["prev_ar"]
+
+    df["feat_t"] = df["t"]
+    df["feat_mes_sin"] = np.sin(2 * np.pi * df["mes_num"] / 12)
+    df["feat_mes_cos"] = np.cos(2 * np.pi * df["mes_num"] / 12)
+
+    feature_cols += ["feat_prev_cl_t", "feat_prev_ar_t", "feat_t",
+                     "feat_mes_sin", "feat_mes_cos"]
+
+    # Remover linhas incompletas
+    df_feat = df.dropna(subset=feature_cols + ["alvo"]).reset_index(drop=True)
+
+    return df_feat, feature_cols
 
 
+# ============================================================
+# 🔶 FUNÇÃO 2 — Next Step Predict (forecast recursivo sem vazamento)
+# ============================================================
 
-    # Nova funcionalidade: Previsão além dos dados realizados
-    st.markdown("---")
-    st.subheader("🔮 Previsão de Vendas Futuras")
+def next_step_predict(estado, prev_cl_t, prev_ar_t,
+                      modelo_ml, feature_cols, lag_window):
 
-    meses_a_frente = st.number_input(
-        "Quantos meses deseja prever além do período disponível?", 
-        min_value=1, max_value=24, value=6
+    estado = estado.copy()
+
+    # ----- Atualiza previsões estruturais do mês -----
+    estado["feat_prev_cl_t"] = prev_cl_t
+    estado["feat_prev_ar_t"] = prev_ar_t
+
+    # ----- Previsão ML -----
+    X_step = pd.DataFrame([estado[feature_cols]])
+    y_ml_t = modelo_ml.predict(X_step)[0]
+
+    # ----- Atualiza lags de Y -----
+    for k in range(lag_window, 1, -1):
+        estado[f"lag_y_{k}"] = estado[f"lag_y_{k-1}"]
+    estado["lag_y_1"] = y_ml_t
+
+    # ----- Atualiza lags clássico -----
+    for k in range(lag_window, 1, -1):
+        estado[f"lag_cl_{k}"] = estado[f"lag_cl_{k-1}"]
+    estado["lag_cl_1"] = prev_cl_t
+
+    # ----- Atualiza lags ARIMA -----
+    for k in range(lag_window, 1, -1):
+        estado[f"lag_ar_{k}"] = estado[f"lag_ar_{k-1}"]
+    estado["lag_ar_1"] = prev_ar_t
+
+    # ----- Calcula novos erros -----
+    err_cl_t = y_ml_t - prev_cl_t
+    err_ar_t = y_ml_t - prev_ar_t
+
+    for k in range(lag_window, 1, -1):
+        estado[f"err_cl_{k}"] = estado[f"err_cl_{k-1}"]
+        estado[f"err_ar_{k}"] = estado[f"err_ar_{k-1}"]
+
+    estado["err_cl_1"] = err_cl_t
+    estado["err_ar_1"] = err_ar_t
+
+    # ----- Atualiza deltas -----
+    for k in range(1, lag_window):
+        estado[f"delta_y_{k}"] = estado[f"lag_y_{k}"] - estado[f"lag_y_{k+1}"]
+        estado[f"delta_cl_{k}"] = estado[f"lag_cl_{k}"] - estado[f"lag_cl_{k+1}"]
+        estado[f"delta_ar_{k}"] = estado[f"lag_ar_{k}"] - estado[f"lag_ar_{k+1}"]
+
+        estado[f"delta_err_cl_{k}"] = estado[f"err_cl_{k}"] - estado[f"err_cl_{k+1}"]
+        estado[f"delta_err_ar_{k}"] = estado[f"err_ar_{k}"] - estado[f"err_ar_{k+1}"]
+
+    # ----- Avança no tempo -----
+    estado["t"] += 1
+    estado["mes_num"] = (estado["mes_num"] % 12) + 1
+
+    return estado, y_ml_t
+
+def treinar_modelo_ml(df_filial, df_prev_classico_full, df_prev_arima_completo,
+                      data_corte, lag_window=6):
+
+    # monta df_base com prev_cl + prev_ar
+    df_base = (
+        df_filial[['data', 'alvo', 't', 'mes_num']]
+        .merge(df_prev_classico_full[['data','previsao']].rename(columns={'previsao':'prev_cl'}),
+               on='data', how='left')
+        .merge(df_prev_arima_completo[['data','previsao']].rename(columns={'previsao':'prev_ar'}),
+               on='data', how='left')
+        .sort_values('data')
+        .reset_index(drop=True)
     )
 
+    # cria features
+    df_feat, feature_cols = build_lags(df_base, lag_window)
 
-   
+    # corta para treino
+    df_train = df_feat[df_feat['data'] <= data_corte]
 
-    if usar_otimizacao:
-        print("🚨 Shape treino:", df_treino.shape)
-        print("🚨 Últimos resíduos:", df_treino['residuo'].tail())
-        print("🚨 Série ARIMA vai ter", len(df_treino.set_index('data')['residuo']), "pontos")
+    # treina XGB
+    modelo_ml = XGBRegressor(
+        n_estimators=400,
+        max_depth=4,
+        learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        objective="reg:squarederror",
+        random_state=42
+    )
 
-        melhor_modelo, historico = otimizar_arima(
-            df_treino=df_treino,
-            df_filial=df_filial,
-            data_corte=data_corte,
-            media_sazonal_treino=media_sazonal_treino,
-            prever_tendencia_individual=prever_tendencia_individual,
-            metrica=metrica_arima.lower(),  # transforma 'R²' em 'r2'
-            grid_p=range(0, 4),
-            grid_d=range(0, 3),
-            grid_q=range(0, 4)
+    modelo_ml.fit(df_train[feature_cols], df_train['alvo'])
+
+    # ⚠️ PREVISÕES HISTÓRICAS DO ML — ESSENCIAL PARA NÃO QUEBRAR NO PREVER!
+    df_feat["prev_ml_hist"] = modelo_ml.predict(df_feat[feature_cols])
+
+    # monta objeto
+    return {
+        "modelo": modelo_ml,
+        "feature_cols": feature_cols,
+        "lag_window": lag_window,
+        "df_feat": df_feat,
+        "df_base": df_base
+    }
+
+
+def prever_ml(modelo_ml_obj, df_filial, df_prev_classico_full, df_prev_arima_completo,
+              data_corte, meses_a_frente, is_share=False):
+
+    modelo_ml = modelo_ml_obj["modelo"]
+    feature_cols = modelo_ml_obj["feature_cols"]
+    lag_window = modelo_ml_obj["lag_window"]
+    df_feat = modelo_ml_obj["df_feat"]
+
+    # Histórico até corte
+    df_train = df_feat[df_feat['data'] <= data_corte]
+    if df_train.empty:
+        raise ValueError("Não há base histórica suficiente para ML até a data de corte!")
+
+    estado = df_train.iloc[-1].copy()
+
+    # Descobre quantos steps são necessários (histórico + futuro)
+    ult_data_hist = df_filial['data'].max()
+    gap_meses = max(0, (ult_data_hist.year - data_corte.year)*12 +
+                       (ult_data_hist.month - data_corte.month))
+    total_steps = gap_meses + meses_a_frente
+
+    futuros = []
+
+    for i in range(1, total_steps+1):
+        data_fut = data_corte + pd.DateOffset(months=i)
+
+        # ------- Segurança obrigatória -------  
+        # tenta buscar prev clássico e ARIMA — se não existir, pula
+        row_cl = df_prev_classico_full.loc[df_prev_classico_full['data'] == data_fut]
+        row_ar = df_prev_arima_completo.loc[df_prev_arima_completo['data'] == data_fut]
+
+        if row_cl.empty or row_ar.empty:
+            # Se a data ainda não existe nas previsões clássica/ARIMA, não dá pra prever ML
+            continue
+
+        prev_cl_t = float(row_cl["previsao"].values[0])
+        prev_ar_t = float(row_ar["previsao"].values[0])
+
+        # ------- previsão recursiva -------  
+        estado, y_ml_t = next_step_predict(
+            estado,
+            prev_cl_t,
+            prev_ar_t,
+            modelo_ml,
+            feature_cols,
+            lag_window
         )
-        p, d, q = melhor_modelo['p'], melhor_modelo['d'], melhor_modelo['q']
-        st.success(f"Melhor ordem ARIMA encontrada: ({p},{d},{q}) com {metrica_arima} = {melhor_modelo['score']:.4f}")
-    else:
-        st.info(f"Usando ARIMA manual: ({p},{d},{q})")
 
-    # Treina o modelo com os parâmetros definidos
-    print("DF TREINO")
-    print(df_treino.head())
-    print(df_treino.tail())
-    
-    serie_residuo = df_treino.set_index('data')['residuo']
-    modelo_arima = ARIMA(serie_residuo, order=(p,d,q))
-    modelo_ajustado = modelo_arima.fit()
-
-
-
-    
-
-    # Número total de períodos (histórico + futuro)
-    n_total = len(df_filial) + meses_a_frente
-
-    # Previsão ARIMA para todo o período
-    residuos_completos = modelo_ajustado.predict(start=0, end=n_total - 1)
-
-    # Construir DataFrame com todas as datas
-    datas_completas = pd.date_range(start=df_filial['data'].iloc[0], periods=n_total, freq='MS')
-    df_arima_completo = pd.DataFrame({
-        'data': datas_completas,
-        'ruido_previsto': residuos_completos
-    })
-
-    # Adiciona t e mês
-    df_arima_completo['t'] = np.arange(n_total)
-    df_arima_completo['mes'] = df_arima_completo['data'].dt.month
-
-    
-    # Index que representa o período com dados realizados
-    n_realizados = df_filial['Realizado'].notnull().sum()
-
-    # Resíduos do ARIMA apenas no período com dados observados
-    residuos_estimados = modelo_ajustado.resid[:n_realizados]
-
-        
-    
-
-    previsoes_arima_full = []
-    for idx, row in df_arima_completo.iterrows():
-        t_i = row['t']
-        mes_i = row['mes']
-        if tipo_tendencia == "Média":
-           tendencia_i = media_realizado
-        else:
-             
-            tendencia_i =  prever_tendencia_individual(t_i)
-        sazonal_i = media_sazonal_treino.get(mes_i, 0)
-        ruido_i = row['ruido_previsto']
-        yhat_log = tendencia_i + sazonal_i + ruido_i
-        previsoes_arima_full.append({
-            'data': row['data'],
-            'previsao': np.exp(yhat_log) - 1,
-            'yhat_log': yhat_log
-            #'ic_inf': np.exp(yhat_log - 1.96 * sigma_arima) - 1,
-            #'ic_sup': np.exp(yhat_log + 1.96 * sigma_arima) - 1
+        futuros.append({
+            "data": data_fut,
+            "previsao": float(y_ml_t)
         })
 
-    df_prev_arima_completo = pd.DataFrame(previsoes_arima_full)
-    print(df_prev_arima_completo.head())
-    print(df_prev_arima_completo.tail())
-
-
-    # Junta as previsões em log com os dados reais em log
-    df_arima_residuos_log = pd.merge(
-        df_real[['data', 'log_venda']],
-        df_prev_arima_completo[['data', 'yhat_log']],
-        on='data',
-        how='inner'
+    # Histórico já previsto pelo ML
+    df_prev_ml_hist = (
+        df_feat[df_feat['data'] <= data_corte][["data", "prev_ml_hist"]]
+        .rename(columns={"prev_ml_hist": "previsao"})
+        .dropna(subset=["previsao"])
     )
 
-    # Calcula o resíduo em log
-    # Filtra apenas até a data de corte
-    df_residuos_treino = df_arima_residuos_log[df_arima_residuos_log['data'] <= data_corte]
-
-
-    df_residuos_treino['erro_log'] = df_residuos_treino['log_venda'] - df_residuos_treino['yhat_log']
-
-
-
-
-
-    # Desvio padrão final
-    sigma_arima = df_residuos_treino['erro_log'].std()
-    if pd.isna(sigma_arima) or sigma_arima == 0:
-        sigma_arima = 1e-6
-
-    df_prev_arima_completo['ic_inf'] = np.exp(df_prev_arima_completo['yhat_log'] - 2.57 * sigma_arima) - 1
-    df_prev_arima_completo['ic_sup'] = np.exp(df_prev_arima_completo['yhat_log'] + 2.57 * sigma_arima) - 1
-
-
-    #Checagem dos Desvios Padrao    
-    print(f"📉 Sigma (Modelo Clássico - sigma_ruido): {sigma_ruido:.4f}")
-    print(f"📈 Sigma (ARIMA nos Resíduos - sigma_arima): {sigma_arima:.4f}")
-
-    if sigma_arima > sigma_ruido:
-        print("⚠️ O desvio padrão do ARIMA é maior que o do modelo clássico. Isso pode deixar o IC mais largo.")
-    elif sigma_arima < sigma_ruido:
-        print("✅ O ARIMA reduziu a variabilidade dos resíduos. Ponto positivo!")
-    else:
-        print("ℹ️ Os desvios padrão dos dois modelos são iguais.")
-    
-    
-    
-    # Previsão para os próximos N períodos (mesmos meses_a_frente)
-    residuos_previstos = modelo_ajustado.forecast(steps=meses_a_frente)
-
-    
-
-
-    # Criar novos períodos futuros
-    ultima_data = df_filial['data'].max()
-    novas_datas = pd.date_range(start=ultima_data + pd.DateOffset(months=1), periods=meses_a_frente, freq='MS')
-    df_futuro = pd.DataFrame({
-        'data': novas_datas,
-        't': np.arange(len(df_filial), len(df_filial) + meses_a_frente),
-    })
-    df_futuro['mes'] = df_futuro['data'].dt.month
-
-    # Gerar previsões futuras
-    previsoes_futuras = []
-    for idx, row in df_futuro.iterrows():
-        t_i = row['t']
-        mes_i = row['mes']
-        if tipo_tendencia == "Média":
-           tendencia_i = media_realizado
-        else:
-             
-            tendencia_i =  prever_tendencia_individual(t_i)
-        sazonal_i = media_sazonal_treino.get(mes_i, 0)
-        yhat_log = tendencia_i + sazonal_i
-        previsoes_futuras.append({
-            'data': row['data'],
-            'previsao': np.exp(yhat_log) - 1,
-            'ic_sup': np.exp(yhat_log + 2.57 * sigma_ruido) - 1,
-            'ic_inf': np.exp(yhat_log - 2.57 * sigma_ruido) - 1
-        })
-    df_prev_futuro = pd.DataFrame(previsoes_futuras)
-
-    # Atualiza previsão final adicionando os resíduos previstos
-    previsoes_ajustadas = []
-    for idx, row in df_futuro.iterrows():
-        t_i = row['t']
-        mes_i = row['mes']
-        if tipo_tendencia == "Média":
-           tendencia_i = media_realizado
-        else: 
-            tendencia_i =  prever_tendencia_individual(t_i)
-        sazonal_i = media_sazonal_treino.get(mes_i, 0)
-        ruido_i = residuos_previstos.iloc[idx] if idx < len(residuos_previstos) else 0
-        yhat_log = tendencia_i + sazonal_i + ruido_i
-        previsoes_ajustadas.append({
-            'data': row['data'],
-            'previsao': np.exp(yhat_log) - 1
-    })
-    df_prev_futuro_arima = pd.DataFrame(previsoes_ajustadas)
-
-    
-
-
-
-
-
-    # Gráfico unificado com histórico + futuro
-    st.markdown("### 📅 Previsão Histórica + Futura")
-    fig, ax = plt.subplots(figsize=(14, 5))
-
-    # Barras (Realizado)
-    ax.bar(df_filial['data'], df_filial['Realizado'], color='lightgray', width=20, label='Realizado')
-
-    #
-    # Concatena os dois blocos
-    df_completo = pd.concat([df_prev, df_prev_futuro])
-
-    # Linha única e IC contínuo (azul, tudo igual)
-    ax.plot(df_completo['data'], df_completo['previsao'], 'o-', color='blue', label='Previsão')
-    ax.fill_between(df_completo['data'], df_completo['ic_inf'], df_completo['ic_sup'], color='blue', alpha=0.2, label='IC 95%')
-
-    # Linha do corte
-    ax.axvline(data_corte, color='red', linestyle='--', label='Corte')
-
-    # Formatação do eixo X
-    todas_datas = pd.concat([df_filial['data'], df_prev_futuro['data']])
-    ax.set_xticks(todas_datas[::2])
-    ax.set_xticklabels(todas_datas[::2].dt.strftime('%Y-%m'), rotation=45)
-
-    # Títulos e legenda
-    ax.set_title(f"Previsão vs Realizado (Histórico + Futuro) – Filial {filial}")
-    ax.set_xlabel("Data")
-    ax.set_ylabel("Vendas")
-    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1))
-    fig.tight_layout(rect=[0, 0, 0.85, 1])
-
-    st.pyplot(fig)
-
-
-
-
-    st.markdown("### 🔁 Comparativo: Previsão com e sem ARIMA nos Resíduos")
-
-    fig, ax = plt.subplots(figsize=(14, 5))
-
-    # Linha clássica
-    ax.plot(df_completo['data'], df_completo['previsao'], 'o--', label='Clássica', color='blue')
-    ax.fill_between(df_completo['data'], df_completo['ic_inf'], df_completo['ic_sup'], color='blue', alpha=0.15, label='IC Clássico')
-
-    # Linha com ARIMA
-    ax.plot(df_prev_arima_completo['data'], df_prev_arima_completo['previsao'], 'o-', label='Com ARIMA nos Resíduos', color='green')
-    ax.fill_between(df_prev_arima_completo['data'], df_prev_arima_completo['ic_inf'], df_prev_arima_completo['ic_sup'], color='green', alpha=0.15, label='IC ARIMA')
-
-    # Barras do realizado
-    ax.bar(df_filial['data'], df_filial['Realizado'], color='lightgray', width=20, label='Realizado')
-
-    # Corte
-    ax.axvline(data_corte, color='red', linestyle='--', label='Corte')
-
-    # Eixos e legendas
-    ax.set_title(f"📊 Previsão Comparativa – Filial {filial}")
-    ax.set_xlabel("Data")
-    ax.set_ylabel("Vendas")
-    ax.legend()
-    st.pyplot(fig)
-
-   
-
-    st.subheader("🧪 Teste de Estacionaridade (ADF) nos Resíduos do ARIMA")
-
-    # Aplica o teste
-    serie_residuos = df_residuos_treino['erro_log'].dropna()
-    resultado_adf = adfuller(serie_residuos)
-
-    # Mostra resultados
-    st.write(f"**Estatística ADF:** {resultado_adf[0]:.4f}")
-    st.write(f"**Valor-p:** {resultado_adf[1]:.4f}")
-    st.write(f"**Nº de lags usados:** {resultado_adf[2]}")
-    st.write(f"**Nº de observações:** {resultado_adf[3]}")
-    st.markdown("**Valores Críticos:**")
-    for key, value in resultado_adf[4].items():
-        st.write(f"{key}: {value:.4f}")
-
-    # Interpretação
-    if resultado_adf[1] < 0.05:
-        st.success("✅ Resíduos são estacionários (rejeita H₀ com 95% de confiança).")
-    else:
-        st.warning("⚠️ Resíduos NÃO são estacionários (não rejeita H₀). Considere aumentar o parâmetro d no ARIMA.")
-
-    #teste sazonalidade dos residuos
-    residuos = df_residuos_treino['erro_log'].values
-
-
-    # Remove média dos resíduos para análise mais pura
-    residuos_centralizados = residuos - np.mean(residuos)
-
-    # FFT
-    fft_resultado = fft(residuos_centralizados)
-    n = len(residuos)
-    frequencias = np.abs(fft_resultado[:n // 2])  # metade inferior é espelho da superior
-
-    # Frequências correspondentes a períodos
-    periodos = np.arange(1, n // 2 + 1)
-
-    # Pega o período dominante (excluindo a componente zero)
-    periodo_dominante = periodos[np.argmax(frequencias[1:])]  # ignorando índice 0
-
-    # Exibe resultado
-    print(f"📊 Ciclo dominante nos resíduos do ARIMA: {periodo_dominante} períodos")
-
-    plt.figure(figsize=(10, 4))
-    plt.plot(periodos[1:], frequencias[1:], label='Magnitude da Frequência')
-    plt.axvline(periodo_dominante, color='red', linestyle='--', label=f'Período dominante: {periodo_dominante}')
-    plt.xlabel("Período")
-    plt.ylabel("Intensidade")
-    plt.title("Análise de Frequência dos Resíduos do ARIMA")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    st.pyplot(plt)
-
-
-
-
-
-    # Período com dados realizados
-    df_real_valid = df_filial[df_filial['Realizado'].notnull()].copy()
-    # Junta Realizado + Previsão Clássica
-    df_classico_valid = df_prev[df_prev['data'].isin(df_filial['data'])]
-    df_comp_classico = pd.merge(df_filial, df_classico_valid, on='data')
-
-    # Junta Realizado + Previsão com ARIMA
-    df_arima_valid = df_prev_arima_completo[df_prev_arima_completo['data'].isin(df_filial['data'])]
-    df_comp_arima = pd.merge(df_filial, df_arima_valid, on='data', suffixes=('', '_arima'))
-
-    # Cria máscaras para períodos
-    mask_realizado = df_comp_classico['Realizado'].notnull()
-    mask_pos_corte = df_comp_classico['data'] > data_corte
-
-    def calcular_metricas(y_true, y_pred):
-        return {
-            'MAPE (%)': mean_absolute_percentage_error(y_true, y_pred) * 100,
-            'R²': r2_score(y_true, y_pred),
-            'RMSE': mean_squared_error(y_true, y_pred, squared=False)
-        }
-
-    # Total
-    m_classico_total = calcular_metricas(df_comp_classico[mask_realizado]['Realizado'],df_comp_classico[mask_realizado]['previsao'])
-    m_arima_total = calcular_metricas(df_comp_arima[mask_realizado]['Realizado'],df_comp_arima[mask_realizado]['previsao'])
-    # Pós-corte
-    m_classico_pos = calcular_metricas(df_comp_classico[mask_realizado & mask_pos_corte]['Realizado'],df_comp_classico[mask_realizado & mask_pos_corte]['previsao'])
-    m_arima_pos = calcular_metricas(df_comp_arima[mask_realizado & mask_pos_corte]['Realizado'],df_comp_arima[mask_realizado & mask_pos_corte]['previsao'])
-    
-    st.markdown("### 🧪 Comparativo de Métricas – Clássico vs ARIMA nos Resíduos")
-
-    # Total
-    st.subheader("🟢 Período Completo")
-
-    st.write("#### Modelo Clássico")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("MAPE (%)", f"{m_classico_total['MAPE (%)']:.2f}")
-    col2.metric("R²", f"{m_classico_total['R²']:.3f}")
-    col3.metric("RMSE", f"{m_classico_total['RMSE']:,.2f}")
-
-    st.write("#### Modelo com ARIMA nos Resíduos")
-    col4, col5, col6 = st.columns(3)
-    col4.metric("MAPE (%)", f"{m_arima_total['MAPE (%)']:.2f}")
-    col5.metric("R²", f"{m_arima_total['R²']:.3f}")
-    col6.metric("RMSE", f"{m_arima_total['RMSE']:,.2f}")
-
-    # Pós-Corte
-    st.subheader("🔴 Período Pós-Corte")
-
-    st.write("#### Modelo Clássico")
-    col7, col8, col9 = st.columns(3)
-    col7.metric("MAPE (%)", f"{m_classico_pos['MAPE (%)']:.2f}")
-    col8.metric("R²", f"{m_classico_pos['R²']:.3f}")
-    col9.metric("RMSE", f"{m_classico_pos['RMSE']:,.2f}")
-
-    st.write("#### Modelo com ARIMA nos Resíduos")
-    col10, col11, col12 = st.columns(3)
-    col10.metric("MAPE (%)", f"{m_arima_pos['MAPE (%)']:.2f}")
-    col11.metric("R²", f"{m_arima_pos['R²']:.3f}")
-    col12.metric("RMSE", f"{m_arima_pos['RMSE']:,.2f}")
-
-    
-
-
-
-    ########################################3
-    
-  # aqui vamos incluir um botao "Aplimorar com Machine Learning" e vamos aplicar o do radom forest
-  # gerar df com a media movel de Y com 4 meses ( t-1 t-2 t-3 t-4 t-5)
-
-  # treinar um modelo de RF Regressor 
-  #####Features: previsao do modelo sazonal + log. (gerado neste codigo) + mes + media movel de 4 meses ( t-1 t-2 t-3 t-4 t-5)
-  ##### treino usar dados antes da linha de corte
-
-
-    #projetar dados a partir da linha de corte 
-    # criar limites de cofianca com as novas projecoes em todo intervalo com realizado
-    
-    #  onde nao tiver mais realziado, estimar de forma recorrente no periodo futuro estabelecido neste codigo
-    # gerar grafico similiar ao inicial mas incluindo os novos limites de confianca e a nova previsa com RF regregssor
-
-    # Checkbox para otimizar
-    otimizar = st.checkbox("🔧 Otimizar hiperparâmetros com RandomizedSearchCV?")   
-    #Escolhe o modelo de ML
-    modelo_escolhido = st.selectbox(
-        "🤖 Escolha o modelo de Machine Learning",
-        ["Random Forest", "Bayesian Ridge", "MLP", "XGBoost", "Decision Tree", "K-Nearest Neighbors", "Ensemble"]
+    df_prev_ml_fut = pd.DataFrame(futuros)
+
+    # Junta hist + futuro
+    df_prev_ml_full = pd.concat([df_prev_ml_hist, df_prev_ml_fut], ignore_index=True)
+
+    # Ordena e limpa
+    df_prev_ml_full = (
+        df_prev_ml_full
+        .dropna(subset=["data", "previsao"])
+        .sort_values("data")
+        .reset_index(drop=True)
     )
 
+    # ICs triviais (ML ainda não usa sigma)
+    df_prev_ml_full["ic_inf"] = df_prev_ml_full["previsao"]
+    df_prev_ml_full["ic_sup"] = df_prev_ml_full["previsao"]
+
+    # Clip (para Share %)
+    df_prev_ml_full = clip_predictions(df_prev_ml_full, is_share)
+
+    return df_prev_ml_full
 
 
-    # Botão de ativação
-    janela_mm = st.number_input(
-    "📏 Tamanho da janela para Média Móvel (n períodos anteriores)",
-    min_value=2, max_value=12, value=4, step=1
+# ===============================
+# Upload
+# ===============================
+arquivo = st.file_uploader("📤 Faça upload do Excel de vendas", type=["xlsx"])
+
+if not arquivo:
+    st.markdown("""
+    <div style='margin-top: 2rem; font-size: 18px;'>
+      🔍 <b>Instruções:</b><br>
+      • Envie um .xlsx com a aba <code>Planilha1</code> (ou usaremos a primeira).<br>
+      • Colunas: <code>ano</code>, <code>mês</code>, <code>Filial</code>, <code>Realizado</code>.<br>
+      • Depois, escolha filial e data de corte. 🎯
+    </div>
+    """, unsafe_allow_html=True)
+    st.stop()
+
+# ===============================
+# Carregamento e preparo base
+# ===============================
+with st.spinner("Lendo e preparando os dados..."):
+    base = safe_sheet_read(arquivo)
+    base = normalize_columns(base)
+
+    # garante tipos
+    base['ano'] = pd.to_numeric(base['ano'], errors='coerce').astype('Int64')
+    base['mes'] = pd.to_numeric(base['mes'], errors='coerce').astype('Int64')
+    base['realizado'] = pd.to_numeric(base['realizado'], errors='coerce')
+    base['filial'] = base['filial'].astype(str).str.strip()
+
+    # data mensal
+    base['data'] = [to_month_start_date(a, m) for a, m in zip(base['ano'], base['mes'])]
+    base = base.dropna(subset=['data']).sort_values('data')
+
+    # total por data e linha "Total"
+    df_total = base.groupby('data', as_index=False)['realizado'].sum()
+    df_total['filial'] = 'Total'
+    df_total['ano'] = df_total['data'].dt.year
+    df_total['mes'] = df_total['data'].dt.month
+
+    df_com_total = pd.concat([base, df_total], ignore_index=True)
+    # total de filiais (exclui 'Total' pra evitar dobrar a soma)
+    soma_filiais = (
+        df_com_total[df_com_total['filial'] != 'Total']
+        .groupby('data')['realizado']
+        .transform('sum')
+    )
+    df_com_total['total_por_data'] = soma_filiais
+    df_com_total['pct_filial'] = df_com_total['realizado'] / df_com_total['total_por_data']
+
+# ===============================
+# Seleções
+# ===============================
+modelo_realizado = st.selectbox("🏁 Base do realizado", ['Real R$', 'Real Share %'])
+
+# filiais disponíveis
+if modelo_realizado == 'Real Share %':
+    filiais_disponiveis = sorted(df_com_total[df_com_total['filial'] != 'Total']['filial'].unique())
+else:
+    filiais_disponiveis = sorted(df_com_total['filial'].unique())
+
+filial = st.selectbox("🏬 Selecione a filial", filiais_disponiveis)
+
+df_filial = (
+    df_com_total[df_com_total['filial'] == filial]
+    .sort_values('data')
+    .reset_index(drop=True)
 )
 
-    def gerar_dados_classificacao_binaria(df, janela_mm, data_corte):
-        df = df.copy()
-        df = df.sort_values(['Filial', 'data']).reset_index(drop=True)
-
-        df['mes'] = df['data'].dt.month
-        # Geração dos lags
-        for i in range(1, janela_mm + 1):
-            df[f'lag_{i}'] = df.groupby('Filial')['Realizado'].shift(i)
-
-        # Delta total (lag_1 - lag_n)
-        df['delta_total'] = df[f'lag_1'] - df[f'lag_{janela_mm}']
-        df['delta_total_bin'] = df['delta_total'].apply(lambda x: 1 if x > 0 else 0)
-        df['var_pct_total'] = df['delta_total'] / (df[f'lag_{janela_mm}'] + 1e-6)
-
-        # Média e desvio padrão dos lags
-        lags_cols = [f'lag_{i}' for i in range(1, janela_mm + 1)]
-        df['media_lags'] = df[lags_cols].mean(axis=1)
-        df['std_lags'] = df[lags_cols].std(axis=1)
-
-        # Variações contínuas + binarizadas entre lags consecutivos
-        for i in range(1, janela_mm):
-            col = f'delta_{i}_{i+1}'
-            df[col] = df[f'lag_{i}'] - df[f'lag_{i+1}']
-            df[f'{col}_bin'] = df[col].apply(lambda x: 1 if x > 0 else 0)
-            df[f'{col}_var_pct'] = df[col] / (df[f'lag_{i+1}'] + 1e-6)
-
-        # Target: subiu ou não (pode trocar por threshold depois)
-        df['Realizado_next'] = df.groupby('Filial')['Realizado'].shift(-1)
-        df['target'] = (df['Realizado_next'] > df['Realizado']).astype(int)
-
-        # Seleciona as colunas
-        col_bin = [col for col in df.columns if '_bin' in col]
-        col_cont = [col for col in df.columns if col in [
-            'delta_total', 'var_pct_total', 'media_lags', 'std_lags'
-        ] or '_var_pct' in col or col.startswith('delta_') and '_bin' not in col]
-
-        col_features = col_bin + col_cont + ['mes']
-
-
-        df_final = df[['data', 'Filial', 'Realizado', 'target'] + col_features].dropna()
-
-        # Separa treino e teste
-        df_treino = df_final[df_final['data'] <= data_corte].copy()
-        df_teste = df_final[df_final['data'] > data_corte].copy()
-
-        return df_treino, df_teste, col_features
-
-#     threshold = st.slider("🎚️ Ajuste o Threshold de Classificação", min_value=0.0, max_value=1.0, value=0.5, step=0.01)
-
-
-#     if st.button("🔥 Gerar Modelo de Classificação"):
-    
-#         #global clf, scaler2
-#         # Geração dos dados
-        
-#         df_treino, df_teste, col_binarias = gerar_dados_classificacao_binaria(df_com_total, janela_mm, data_corte)
-
-#         X_train = df_treino[col_binarias]
-#         y_train = df_treino['target']
-#         X_test = df_teste[col_binarias]
-#         y_test = df_teste['target']
-
-#         X_train_split, X_val_split, y_train_split, y_val_split = train_test_split(
-#         X_train, y_train, test_size=0.3, random_state=42, stratify=y_train
-# )
-
-
-#        # import seaborn as sns
-#         #import matplotlib.pyplot as plt
-
-#     #     # Calcular correlação
-#     #     corr = pd.DataFrame(X_train, columns=col_binarias).corr()
-
-#     #     # Criar o gráfico
-#     #     fig, ax = plt.subplots(figsize=(10, 8))
-#     #     sns.heatmap(corr, annot=False, cmap='coolwarm', ax=ax)
-#     #     st.pyplot(fig)
-#     #  #-------------------SVM
-        
-        
-#         # from sklearn.model_selection import GridSearchCV
-     
-
-#         # param_svc_grid = [
-#         #     {
-#         #         'kernel': ['rbf'],
-#         #         'C': [0.1, 1, 10, 100, 200],
-#         #         'gamma': ['scale', 'auto', 0.01, 0.1, 1, 10],
-#         #         'class_weight': ['balanced'],
-#         #         'probability': [True]
-#         #     },
-#         #     {
-#         #         'kernel': ['poly'],
-#         #         'C': [0.1, 1, 10, 20],
-#         #         'gamma': ['scale', 0.01, 0.1],
-#         #         'degree': [2, 3],
-#         #         'class_weight': ['balanced'],
-#         #         'probability': [True]
-#         #     }
-#         # ]
-
-#         # svc_search = GridSearchCV(
-#         #     SVC(random_state=42),
-#         #     param_grid=param_svc_grid,
-#         #     cv=10,
-#         #     scoring='f1',
-#         #     n_jobs=1,
-#         #     verbose=2
-#         # )
-
-
-#         scaler2 = StandardScaler()
-#         X_train_split_scaled = scaler2.fit_transform(X_train_split)
-#         X_test_scaled = scaler2.transform(X_test)   
-#         X_val_split_scaled  = scaler2.transform(X_val_split)
-
-#         # svc_search.fit(X_train_scaled, y_train)
-#         # best_svc = svc_search.best_estimator_
- 
-        
-        
-#         # Modelo
-#         #clf = MLPClassifier(hidden_layer_sizes=(64,32,8), max_iter=5000, random_state=42)
-#         #clf = GradientBoostingClassifier(n_estimators=300, learning_rate=0.05)
-#         clf = SVC(kernel='rbf', class_weight='balanced', probability=True)
-#         #clf = xgb.XGBClassifier(n_estimators=600,learning_rate=0.05,max_depth=10,scale_pos_weight=4)  # bom pra balancear manualmente a classe minoritáriause_label_encoder=False,eval_metric='logloss',random_state=42)
-#         #clf = RandomForestClassifier(n_estimators=500,class_weight="balanced", random_state=42)
-        
-         
-#         #base_models = [
-#           #  ('rf', best_rf),  # <- otimizado!
-#            # ('xgb', best_xgb),  # <- otimizado! ,
-#            # ('lr', LogisticRegression(class_weight='balanced'))
-#          #]
-
-
-
-#         #meta_model = LogisticRegression()
-#         #clf_stacking = StackingClassifier(
-#         #    estimators=base_models,
-#          #   final_estimator=meta_model,
-#           #  passthrough=True  # passa features originais pro meta-modelo também
-#         #)
-
-      
-#         #clf = VotingClassifier(
-#          #   estimators=[
-#           #      ('stacking', clf_stacking),
-#                 #('knn',KNeighborsClassifier(n_neighbors=5, weights='distance', p=2)),  # algo diferente
-#                 #('gb',GradientBoostingClassifier(n_estimators=200, learning_rate=0.05)),
-#            #     ('mlp',best_mlp),
-#                 #('svm', SVC(kernel='rbf', class_weight='balanced', probability=True))
-                
-#             #],
-#             #voting='soft'
-#        # )
-
-
-#         clf.fit(X_train_split_scaled, y_train_split)
-
-
-#         y_val_prob = clf.predict_proba(X_val_split_scaled)[:, 1]
-#         y_val_pred = (y_val_prob >= threshold).astype(int)  
-
-#         # Métricas de avaliação (validação)
-#         report_val = classification_report(y_val_split, y_val_pred, target_names=["Não Subiu", "Subiu"], output_dict=True)
-#         conf_val = confusion_matrix(y_val_split, y_val_pred)
-
-#         # Exibição
-#         st.markdown("### 📊 Validação do Modelo (Holdout 30%)")
-#         df_report = pd.DataFrame(report_val).T
-#         df_report[['precision', 'recall', 'f1-score']] *= 100
-
-#         st.dataframe(df_report.style.format({
-#             'precision': '{:.1f}%',
-#             'recall': '{:.1f}%',
-#             'f1-score': '{:.1f}',
-#             'support': '{:.0f}'
-#         }).background_gradient(cmap='Blues', axis=0))
-
-#         st.markdown("### 🧮 Matriz de Confusão (Validação)")
-#         st.dataframe(pd.DataFrame(conf_val, 
-#             index=["Real: Não Subiu", "Real: Subiu"], 
-#             columns=["Pred: Não Subiu", "Pred: Subiu"]
-#         ).style.background_gradient(cmap='Oranges'))
-
-
-#         # Previsões
-#         y_prob = clf.predict_proba(X_test_scaled)[:, 1]
-#         y_pred = (y_prob >= threshold).astype(int)
-
-#         #y_pred = clf.predict(X_test)
-
-#         # Resultados
-#        # Relatório de Classificação - formatado bonitão
-
-#         report_dict = classification_report(y_test, y_pred, target_names=["Não Subiu", "Subiu"], output_dict=True)
-#         report_df = pd.DataFrame(report_dict).T
-
-#         # Converte para porcentagem onde faz sentido
-#         report_df[['precision', 'recall', 'f1-score']] = report_df[['precision', 'recall', 'f1-score']] * 100
-
-#         # Formata visual bonitão
-#         st.markdown("### 📊 Relatório de Classificação")
-#         st.dataframe(report_df.style.format({
-#             'precision': '{:.1f}%',
-#             'recall': '{:.1f}%',
-#             'f1-score': '{:.1f}',
-#             'support': '{:.0f}'
-#         }).background_gradient(cmap='Blues', axis=0))
-
-#         # Matriz de confusão formatada
-#         conf_mat = confusion_matrix(y_test, y_pred)
-#         conf_df = pd.DataFrame(
-#             conf_mat,
-#             index=["Real: 0 (Não Subiu)", "Real: 1 (Subiu)"],
-#             columns=["Pred: 0", "Pred: 1"]
-#         )
-
-#         st.markdown("### 🧮 Matriz de Confusão")
-#         st.dataframe(conf_df.style.background_gradient(cmap='Oranges'))
-#         print(X_train.head(25))
-
-#         # Métricas de validação
-#         metricas_val = {
-#             'Accuracy': accuracy_score(y_val_split, y_val_pred),
-#             'Precision': precision_score(y_val_split, y_val_pred),
-#             'Recall': recall_score(y_val_split, y_val_pred),
-#             'F1': f1_score(y_val_split, y_val_pred)
-#         }
-
-#         # Métricas do teste real
-#         metricas_teste = {
-#             'Accuracy': accuracy_score(y_test, y_pred),
-#             'Precision': precision_score(y_test, y_pred),
-#             'Recall': recall_score(y_test, y_pred),
-#             'F1': f1_score(y_test, y_pred)
-#         }    
-
-#         labels = ['Accuracy', 'Precision', 'Recall', 'F1']
-#         valores_val = [metricas_val['Accuracy'], metricas_val['Precision'], metricas_val['Recall'], metricas_val['F1']]
-#         valores_test = [metricas_teste['Accuracy'], metricas_teste['Precision'], metricas_teste['Recall'], metricas_teste['F1']]
-
-#         x = range(len(labels))
-#         width = 0.35
-
-#         fig, ax = plt.subplots(figsize=(10, 4)) 
-#         ax.bar(x, valores_val, width, label='Validação (Holdout)', color='blue')
-#         ax.bar([i + width for i in x], valores_test, width, label='Teste Pós-Corte', color='orange')
-
-#         ax.set_xticks([i + width / 2 for i in x])
-#         ax.set_xticklabels(labels)
-#         ax.set_ylabel('Score')
-#         ax.set_title('Comparativo de Métricas')
-#         ax.legend()
-
-#         st.pyplot(fig)
-#         from sklearn.metrics import precision_recall_curve
-
-#         # Calcula precision, recall e thresholds
-#         precisions, recalls, limiares = precision_recall_curve(y_test, y_prob)
-
-#         # Plota
-#         fig, ax = plt.subplots(figsize=(10, 3))
-#         ax.plot(limiares, precisions[:-1], label='Precision', color='blue')
-#         ax.plot(limiares, recalls[:-1], label='Recall', color='orange')
-#         ax.set_title("🎯 Precision vs Recall por Threshold")
-#         ax.set_xlabel("Threshold")
-#         ax.set_ylabel("Score")
-#         ax.set_ylim([0, 1])
-#         ax.grid(True)
-#         ax.legend()
-#         st.pyplot(fig)
-
-#         try:
-#             df_aplicacao = df_com_total.copy()
-#             df_aplicacao = df_aplicacao.sort_values(['Filial', 'data']).reset_index(drop=True)
-
-#             # Recria as features binárias (com a mesma função usada no treino)
-#             df_treino_aplic, df_teste_aplic, col_binarias = gerar_dados_classificacao_binaria(df_aplicacao, janela_mm, data_corte)
-#             df_aplicacao_final = pd.concat([df_treino_aplic, df_teste_aplic]).copy()
-
-#             # Aplica transformação e previsão
-#             X_aplic = df_aplicacao_final[col_binarias]
-#             X_aplic_scaled = scaler2.transform(X_aplic)
-#             prob_clf = clf.predict_proba(X_aplic_scaled)[:, 1]
-#             pred_clf = (prob_clf >= threshold).astype(int)
-
-#             # Adiciona previsões
-#             df_aplicacao_final['prob_clf'] = prob_clf
-#             df_aplicacao_final['pred_clf'] = pred_clf
-
-#             # Salva no session_state e mostra preview
-#             st.session_state.df_classificacao_resultado = df_aplicacao_final
-#             st.success("✅ Modelo aplicado ao dataframe completo!")
-
-#             st.markdown("### 🔍 Amostra das previsões aplicadas")
-#             st.dataframe(df_aplicacao_final[['data', 'Filial', 'prob_clf', 'pred_clf'] + col_binarias].tail(10))
-#             df_com_total = df_aplicacao_final
-
-#         except Exception as e:
-#             st.error(f"Erro ao aplicar o modelo no dataframe completo: {e}")
-
-
-
-    
-
-    if st.button("🔥 Aprimorar com Machine Learning"):
-        st.markdown(f"### 🧠 Previsão com {modelo_escolhido}")
-
-        
-
-
-        
-
-        # Prepara scaler e modelo base
-        scaler = None
-        model = None
-
-        def adicionar_sazonalidade_fft(df, periodo, col_prefix=''):
-            idx = np.arange(len(df))
-            df[f'{col_prefix}seno_{periodo}'] = np.sin(2 * np.pi * idx / periodo)
-            df[f'{col_prefix}cosseno_{periodo}'] = np.cos(2 * np.pi * idx / periodo)
-            return df
-
-       
-        
-
-        #features
-        df_prev_arima_completo_2 = df_prev_arima_completo.rename(columns={'previsao': 'prev_arima'})
-
-
-        df_ml = df_merged.copy()
-        df_ml['mm'] = df_ml['Realizado'].shift(1).rolling(window= janela_mm).mean()
-        df_ml['std_mm'] = df_ml['Realizado'].shift(1).rolling(window=janela_mm).std()
-        df_ml['mes'] = df_ml['data'].dt.month
-        df_ml = pd.merge(df_ml, df_prev_arima_completo_2[['data', 'prev_arima']], on='data', how='left')
-        df_ml['erro_c_a'] = (df_ml['prev_arima']/df_ml['previsao'])-1
-        
-        #teste com os logs
-        #df_ml['prev_arima'] = np.log(df_ml['prev_arima'] + 1)
-        #df_ml['previsao'] = np.log(df_ml['previsao'] + 1)/np.log(df_ml['prev_arima'] + 1)
-       
-
-       
-       # Lags conforme janela selecionada
-        for i in range(1, janela_mm + 1):
-            df_ml[f'lag_{i}'] = df_ml['Realizado'].shift(i)
-
-        df_ml['delta_lags'] = df_ml[f'lag_1'] - df_ml[f'lag_{janela_mm}']
-        df_ml['min_lags'] = df_ml[[f'lag_{i}' for i in range(1, janela_mm + 1)]].min(axis=1)
-        df_ml['max_lags'] = df_ml[[f'lag_{i}' for i in range(1, janela_mm + 1)]].max(axis=1)
-
-        # Variações percentuais entre os lags (lag_i vs lag_{i+1})
-        for i in range(1, janela_mm):
-            df_ml[f'var_pct_lag_{i}_{i+1}'] = (df_ml[f'lag_{i}'] - df_ml[f'lag_{i+1}']) / (df_ml[f'lag_{i+1}'] + 1e-6)
-
-
-
-        df_ml = adicionar_sazonalidade_fft(df_ml,periodo_dominante)
-        print(df_ml.head())
-
-
-        #colunas_features = ['previsao', 'mes', 'mm', 'std_mm','delta_lags', 'min_lags', 'max_lags'] + [f'lag_{i}' for i in range(1, janela_mm + 1)]
-        #colunas_features = ['previsao', 'prev_arima','erro_c_a', 'mes', 'mm', 'std_mm', 'delta_lags', 'min_lags', 'max_lags',  f'seno_{periodo_dominante}', f'cosseno_{periodo_dominante}'] + [f'lag_{i}' for i in range(1, janela_mm + 1)]
-
-
-        colunas_var_pct = [f'var_pct_lag_{i}_{i+1}' for i in range(1, janela_mm)]
-        colunas_features = ['previsao', 'prev_arima','erro_c_a', 'mes', 'mm', 'std_mm','delta_lags', 'min_lags', 'max_lags',f'seno_{periodo_dominante}', f'cosseno_{periodo_dominante}'] + [f'lag_{i}' for i in range(1, janela_mm + 1)] + colunas_var_pct
-
-
-
-        
-        def construir_X_fut(prev_classica, prev_arima_i, erro_c_a_i, mes_i, mm_i, std_i,
-                            ultimos_valores, janela_mm, colunas_features,
-                            indice_futuro, periodo_dominante):
-
-            # Pega os últimos valores defasados
-            lags_valores = list(reversed(ultimos_valores[-janela_mm:]))
-            while len(lags_valores) < janela_mm:
-                lags_valores.insert(0, np.nan)
-
-            if len(lags_valores) == janela_mm:
-                delta_lags = lags_valores[-1] - lags_valores[0]
-                min_lags = min(lags_valores)
-                max_lags = max(lags_valores)
-            else:
-                delta_lags = 0
-                min_lags = 0
-                max_lags = 0
-
-            # Seno e cosseno para componente sazonal
-            seno = np.sin(2 * np.pi * indice_futuro / periodo_dominante)
-            cosseno = np.cos(2 * np.pi * indice_futuro / periodo_dominante)
-            
-
-            # Calcula as variações percentuais entre os lags
-            var_pct_lags = []
-            for i in range(janela_mm - 1):
-                atual = lags_valores[i]
-                prox = lags_valores[i + 1]
-                if prox == 0 or np.isnan(prox) or np.isnan(atual):
-                    var_pct = 0
-                else:
-                    var_pct = (atual - prox) / (prox + 1e-6)
-                var_pct_lags.append(var_pct)
-
-            # Junta tudo
-            linha = [prev_classica, prev_arima_i, erro_c_a_i, mes_i, mm_i, std_i,
-                    delta_lags, min_lags, max_lags, seno, cosseno] + lags_valores + var_pct_lags
-
-
-            
-            return pd.DataFrame([linha], columns=colunas_features)
-
-
-
-        df_ml = df_ml.dropna(subset=colunas_features)
-
-
-
-        df_treino_ml = df_ml[df_ml['data'] <= data_corte].copy()
-        X_train = df_treino_ml[colunas_features]
-        y_train = df_treino_ml['Realizado']
-
-
-
-
-        X_train_split, X_test_split, y_train_split, y_test_split = train_test_split(
-            X_train, y_train, test_size=0.5, random_state=42
+if df_filial.empty:
+    st.error("Sem dados para a filial selecionada.")
+    st.stop()
+
+# coluna alvo e log
+if modelo_realizado == 'Real Share %':
+    df_filial['alvo'] = df_filial['pct_filial'].fillna(0.0)
+else:
+    df_filial['alvo'] = df_filial['realizado'].fillna(0.0)
+
+# eixo temporal e mês
+df_filial['t'] = np.arange(len(df_filial))
+df_filial['mes_num'] = df_filial['data'].dt.month
+
+datas = df_filial['data'].tolist()
+default_corte = datas[-4] if len(datas) >= 4 else datas[-1]
+data_corte = st.select_slider("📅 Data de corte para previsão", options=datas, value=default_corte)
+
+tipo_tendencia = st.selectbox("📈 Tipo de Tendência", [ "Linear", "Quadrática","Média"])
+
+
+# ===============================
+# Tendência + sazonalidade (ENCAPSULADO)
+# ===============================
+modelo_classico, df_treino, df_real = treinar_modelo_classico(
+    df_filial=df_filial,
+    data_corte=data_corte,
+    tipo_tendencia=tipo_tendencia
+)
+
+# pega sigma e sazonalidade se quiser usar em outros lugares (ARIMA, etc.)
+sigma_ruido = modelo_classico.sigma_ruido
+saz_media = modelo_classico.saz_media
+
+# Previsão clássica (sem ARIMA) para todo histórico
+prevs = []
+for _, row in df_filial.iterrows():
+    t_i = int(row['t'])
+    m_i = int(row['mes_num'])
+    y, ic_inf, ic_sup, _ = modelo_classico.prever_nivel_com_ic(t_i, m_i)
+    prevs.append({
+        'data': row['data'],
+        'previsao': y,
+        'ic_inf': ic_inf,
+        'ic_sup': ic_sup
+    })
+
+df_prev_classico_hist = pd.DataFrame(prevs)
+
+# ===============================
+# ARIMA nos resíduos (ENCAPSULADO)
+# ===============================
+st.markdown("---")
+st.subheader("🔮 Previsão de Vendas Futuras")
+
+meses_a_frente = st.number_input("Meses à frente", min_value=1, max_value=24, value=6)
+
+usar_otimizacao = st.checkbox("🔍 Otimizar parâmetros do ARIMA automaticamente", value=False)
+
+if usar_otimizacao:
+    # rodamos o rolling-origin para escolher o melhor ARIMA
+    melhor, hist = otimizar_arima(
+        df_treino=df_treino,
+        metrica='mape'
+    )
+    p, d, q = melhor['p'], melhor['d'], melhor['q']
+    st.success(f"Melhor ARIMA encontrado: ({p},{d},{q}) — erro médio = {melhor['erro']:.4f}")
+
+else:
+    ordem_arima_txt = st.text_input("Ordem do ARIMA (p,d,q)", "1,0,0")
+    p, d, q = parse_arima_order(ordem_arima_txt)
+    st.info(f"Usando ARIMA manual: ({p},{d},{q})")
+
+
+# ---------------------------------------
+# treinar modelo ARIMA encapsulado
+# ---------------------------------------
+modelo_arima = treinar_arima_ruido(df_treino, (p, d, q))
+
+
+# ---------------------------------------
+# Reconstrução dos resíduos (A + B + C)
+# ---------------------------------------
+serie_residuo = df_treino.set_index("data")["ruido"]
+
+tam_A = len(df_treino)
+tam_B = len(df_filial) - len(df_treino)
+tam_C = meses_a_frente
+
+# resíduos fitted (A)
+residuos_A = modelo_arima.modelo.fittedvalues
+
+# resíduos futuros (B + C)
+steps_forecast = tam_B + tam_C
+residuos_BC = modelo_arima.modelo.forecast(steps=steps_forecast)
+
+# junta tudo
+residuos_todos = pd.concat([residuos_A, residuos_BC])
+
+datas_todas = pd.date_range(
+    start=df_filial['data'].iloc[0],
+    periods=len(residuos_todos),
+    freq='MS'
+)
+
+df_all = pd.DataFrame({
+    'data': datas_todas,
+    't': np.arange(len(residuos_todos)),
+    'mes_num': datas_todas.month,
+    'ruido_prev': residuos_todos.values
+})
+
+# reconstruir previsões completas
+prevs_arima_full = []
+for _, row in df_all.iterrows():
+    t_i = int(row['t'])
+    m_i = int(row['mes_num'])
+
+    tend_saz_log = modelo_classico.prever_log(t_i, m_i)
+    ruido_i = float(row['ruido_prev'])
+
+    yhat_log = tend_saz_log + ruido_i
+
+    prevs_arima_full.append({
+        'data': row['data'],
+        'yhat_log': yhat_log,
+        'previsao': np.exp(yhat_log) - 1.0
+    })
+
+df_prev_arima_completo = pd.DataFrame(prevs_arima_full)
+# ===============================
+# Sigma do ARIMA (somente período A, sem vazamento)
+# ===============================
+
+# 1) Reconstruir tendência + sazonalidade no período A
+df_A = df_treino.copy()
+
+df_A["tend_saz_log"] = [
+    modelo_classico.prever_log(int(row.t), int(row.data.month))
+    for _, row in df_A.iterrows()
+]
+
+# 2) Adiciona o ruído fitted (ARIMA) — alinhado pelo índice
+df_A["ruido_fitted"] = residuos_A.values
+
+# 3) Reconstrói o yhat no log
+df_A["yhat_log"] = df_A["tend_saz_log"] + df_A["ruido_fitted"]
+
+# 4) Cálculo do erro no log somente na área de treino
+df_A["erro_log"] = df_A["log_venda"] - df_A["yhat_log"]
+
+# 5) Sigma baseado somente no treino
+sigma_arima = float(df_A["erro_log"].std())
+if not np.isfinite(sigma_arima) or sigma_arima == 0:
+    sigma_arima = 1e-6
+if not np.isfinite(sigma_arima) or sigma_arima == 0:
+    sigma_arima = 1e-6
+
+# ===============================
+# Aplicar Intervalo de Confiança no forecast completo (A + B + C)
+# ===============================
+df_prev_arima_completo["ic_inf"] = (
+    np.exp(df_prev_arima_completo["yhat_log"] - 2.57 * sigma_arima) - 1.0
+)
+
+df_prev_arima_completo["ic_sup"] = (
+    np.exp(df_prev_arima_completo["yhat_log"] + 2.57 * sigma_arima) - 1.0
+)
+
+
+# Junta clássico (histórico) + futuro clássico sem ARIMA
+# (futuro clássico reaproveita sigma_ruido e tendência+sazonal)
+ult_data = df_filial['data'].max()
+datas_fut = pd.date_range(start=ult_data + pd.DateOffset(months=1), periods=meses_a_frente, freq='MS')
+fut = []
+start_t = int(df_filial['t'].max()) + 1
+for i, dta in enumerate(datas_fut):
+    t_i = start_t + i
+    m_i = int(dta.month)
+    yhat_log = modelo_classico.prever_log(t_i, m_i)
+
+    fut.append({
+        'data': dta,
+        'previsao': np.exp(yhat_log) - 1.0,
+        'ic_inf': np.exp(yhat_log - 2.57*sigma_ruido) - 1.0,
+        'ic_sup': np.exp(yhat_log + 2.57*sigma_ruido) - 1.0
+    })
+df_prev_futuro_classico = pd.DataFrame(fut)
+
+df_prev_classico_hist = df_prev_classico_hist.sort_values('data')
+df_prev_classico_full = pd.concat([df_prev_classico_hist, df_prev_futuro_classico], ignore_index=True)
+
+# Clip de previsões conforme o modo (R$ vs Share)
+is_share = (modelo_realizado == 'Real Share %')
+df_prev_classico_full = clip_predictions(df_prev_classico_full, is_share)
+df_prev_arima_completo = clip_predictions(df_prev_arima_completo, is_share)
+
+# ============================================================
+# 🔶 APLICAÇÃO MACHINE LEARNING
+# ============================================================
+# ============================================================
+# 🔶 PIPELINE ML COMPLETO (treino + histórico + forecast futuro)
+# ============================================================
+
+# Ativa o modelo ML se o usuário quiser
+usar_ml = st.checkbox("🤖 Ativar previsão com Machine Learning (ML)", value=False)
+
+if usar_ml:
+    st.subheader("🔮 Previsão via Modelo ML (Meta-Model)")
+    lag_window = st.slider("Janela de lags (N)", min_value=3, max_value=12, value=6)
+
+    # 1) Treina ML
+    modelo_ml_obj = treinar_modelo_ml(
+        df_filial=df_filial,
+        df_prev_classico_full=df_prev_classico_full,
+        df_prev_arima_completo=df_prev_arima_completo,
+        data_corte=data_corte,
+        lag_window=lag_window
+    )
+
+    # 2) Faz toda previsao (histórico + futuro)
+    df_prev_ml_full = prever_ml(
+        modelo_ml_obj,
+        df_filial,
+        df_prev_classico_full,
+        df_prev_arima_completo,
+        data_corte,
+        meses_a_frente
+    )
+
+    # 3) Clipa se share
+    df_prev_ml_full = clip_predictions(df_prev_ml_full, is_share)
+
+  
+# ======================================================
+# 🎨 GRÁFICO MASTER — Realizado vs Clássico vs ARIMA vs ML
+# ======================================================
+st.markdown("## 📊 Comparativo de Modelos — Filial " + filial)
+
+fig, ax = plt.subplots(figsize=(16, 6))
+
+# ------------------------------------------------------
+# BASE REAL - sempre atrás
+# ------------------------------------------------------
+ax.bar(df_filial['data'], 
+       df_filial['alvo'], 
+       width=20, 
+       color='gray', 
+       alpha=0.35, 
+       label='Realizado', 
+       zorder=1)
+
+# ------------------------------------------------------
+# CLÁSSICO (linha + IC FUTURO apenas)
+# ------------------------------------------------------
+ax.plot(df_prev_classico_full['data'],
+        df_prev_classico_full['previsao'],
+        'o--', color='black', label='Clássico', zorder=4)
+
+mask_future = df_prev_classico_full['data'] >= data_corte
+ax.fill_between(df_prev_classico_full.loc[mask_future, 'data'],
+                df_prev_classico_full.loc[mask_future, 'ic_inf'],
+                df_prev_classico_full.loc[mask_future, 'ic_sup'],
+                alpha=0.12, color='black', zorder=2)
+
+# ------------------------------------------------------
+# ARIMA (linha + IC FUTURO apenas)
+# ------------------------------------------------------
+ax.plot(df_prev_arima_completo['data'],
+        df_prev_arima_completo['previsao'],
+        'o-', color='royalblue', linewidth=2,
+        label='ARIMA (Resíduos)', zorder=5)
+
+mask_future_arima = df_prev_arima_completo['data'] >= data_corte
+ax.fill_between(df_prev_arima_completo.loc[mask_future_arima, 'data'],
+                df_prev_arima_completo.loc[mask_future_arima, 'ic_inf'],
+                df_prev_arima_completo.loc[mask_future_arima, 'ic_sup'],
+                alpha=0.18, color='royalblue', zorder=2)
+
+# ------------------------------------------------------
+# ML (linha apenas, sem banda)
+# ------------------------------------------------------
+if usar_ml:
+    ax.plot(df_prev_ml_full['data'],
+            df_prev_ml_full['previsao'],
+            'o-', color='purple', linewidth=2,
+            label='ML Meta-Model', zorder=6)
+
+# ------------------------------------------------------
+# CORTE
+# ------------------------------------------------------
+ax.axvline(data_corte, linestyle='--', color='red', linewidth=2,
+           label='Data de Corte', zorder=10)
+
+# ------------------------------------------------------
+# FORMATAÇÃO FINAL
+# ------------------------------------------------------
+ax.set_title(f"📈 Comparativo de Modelos — Filial {filial}", fontsize=16)
+ax.set_xlabel("Data")
+ax.set_ylabel("Vendas" if not is_share else "Participação (%)")
+ax.legend()
+
+
+buf = io.BytesIO()
+fig.savefig(buf, format="png", dpi=300, bbox_inches="tight")
+buf.seek(0)
+
+
+st.pyplot(fig)
+
+
+
+
+
+# somente datas observadas (histórico)
+df_classico_valid = pd.merge(df_filial[['data','alvo']], 
+                             df_prev_classico_full[['data','previsao']], on='data', how='inner')
+df_arima_valid = pd.merge(df_filial[['data','alvo']], 
+                          df_prev_arima_completo[['data','previsao']], on='data', how='inner')
+
+# ======================================================
+# 📐 MÉTRICAS — PRÉ e PÓS-CORTE — Todos os Modelos
+# ======================================================
+
+st.markdown("## 📐 Métricas Comparativas dos Modelos")
+
+# --- Janelas ---
+mask_obs = df_classico_valid['alvo'].notnull()
+mask_pos = df_classico_valid['data'] > data_corte
+
+# --- Métricas ---
+m_class_total = calc_metrics(df_classico_valid.loc[mask_obs,'alvo'],
+                             df_classico_valid.loc[mask_obs,'previsao'])
+
+m_arima_total = calc_metrics(df_arima_valid.loc[mask_obs,'alvo'],
+                             df_arima_valid.loc[mask_obs,'previsao'])
+
+m_class_pos = calc_metrics(df_classico_valid.loc[mask_pos,'alvo'],
+                           df_classico_valid.loc[mask_pos,'previsao']) if mask_pos.any() else {'MAPE (%)':np.nan,'R²':np.nan,'RMSE':np.nan}
+
+m_arima_pos = calc_metrics(df_arima_valid.loc[mask_pos,'alvo'],
+                           df_arima_valid.loc[mask_pos,'previsao']) if mask_pos.any() else {'MAPE (%)':np.nan,'R²':np.nan,'RMSE':np.nan}
+
+if usar_ml:
+    df_valid_ml = df_prev_ml_full.merge(df_filial[['data','alvo']], on='data', how='inner')
+    m_ml_total = calc_metrics(df_valid_ml['alvo'], df_valid_ml['previsao'])
+else:
+    m_ml_total = None
+
+if usar_ml:
+    df_valid_ml = df_prev_ml_full.merge(df_filial[['data','alvo']], on='data', how='inner')
+
+    # total ML
+    m_ml_total = calc_metrics(df_valid_ml['alvo'], df_valid_ml['previsao'])
+
+    # pós-corte ML
+    mask_obs_ml = df_valid_ml['alvo'].notnull()
+    mask_pos_ml = df_valid_ml['data'] > data_corte
+
+    if (mask_obs_ml & mask_pos_ml).any():
+        m_ml_pos = calc_metrics(
+            df_valid_ml.loc[mask_obs_ml & mask_pos_ml, 'alvo'],
+            df_valid_ml.loc[mask_obs_ml & mask_pos_ml, 'previsao']
         )
-
-
-
-
-        #X_train_split = X_train
-        #y_train_split = y_train
-        #X_test_split = X_train
-        #y_test_split = y_train
-
-
-        # Modelagem
-        scaler = None
-        if modelo_escolhido == "Random Forest":
-            model = RandomForestRegressor(n_estimators=100, random_state=42)
-        elif modelo_escolhido == "Bayesian Ridge":
-            model = BayesianRidge()
-        elif modelo_escolhido == "MLP":
-            scaler = StandardScaler()
-            X_train_split = scaler.fit_transform(X_train_split)
-            X_test_split = scaler.transform(X_test_split)
-            model = MLPRegressor(hidden_layer_sizes=(8), max_iter=10000, random_state=42)
-        elif modelo_escolhido == "XGBoost":
-            model = xgb.XGBRegressor(n_estimators=100, random_state=42)
-        elif modelo_escolhido == "Decision Tree":
-            model = DecisionTreeRegressor(max_depth=10, random_state=42)
-        elif modelo_escolhido == "K-Nearest Neighbors":     
-             model = KNeighborsRegressor(n_neighbors=3)
-        elif modelo_escolhido == "Ensemble":
-                        
-           # Modelos
-            model_rf = RandomForestRegressor(n_estimators=100, random_state=42)
-            model_bayes = BayesianRidge()
-            model_linear = LinearRegression()
-            model_xgb = xgb.XGBRegressor(n_estimators=100, random_state=42)
-            model_dt = DecisionTreeRegressor(max_depth=10, random_state=42)
-            model_kn = KNeighborsRegressor(n_neighbors=3)
-            # Ensemble
-            model = VotingRegressor(estimators=[
-                ('rf', model_rf),
-                ('bayes', model_bayes),
-               # ('linear', model_linear),
-                ('xgb', model_xgb),
-                ('dt',model_dt),
-                ('kn',model_kn),
-            ])
-
-        base_model = model               
-        
-        # Aplica otimização
-        if otimizar and modelo_escolhido in param_grids:
-            st.info("⏳ Buscando melhores hiperparâmetros...")
-            search = RandomizedSearchCV(
-                base_model,
-                param_distributions=param_grids[modelo_escolhido],
-                n_iter=10,
-                cv=3,
-                random_state=42,
-                n_jobs=-1
-            )
-            search.fit(X_train_split, y_train_split)
-            model = search.best_estimator_
-            st.success(f"✅ Melhor modelo encontrado: {search.best_params_}")
-        else:
-            model = base_model
-
-
-        model.fit(X_train_split, y_train_split)
-
-        # Verifica se o modelo tem o atributo de importância
-        if hasattr(model, 'feature_importances_'):
-            importances = model.feature_importances_
-            df_importancia = pd.DataFrame({
-                'Feature': colunas_features,
-                'Importância': importances
-            }).sort_values(by='Importância', ascending=False)
-
-            st.markdown("### 🌟 Importância das Features")
-            st.dataframe(df_importancia.style.format({"Importância": "{:.2%}"}))
-
-            # Gráfico
-            fig, ax = plt.subplots(figsize=(10, 4))
-            ax.barh(df_importancia['Feature'], df_importancia['Importância'])
-            ax.set_xlabel("Importância")
-            ax.set_title(f"Importância das Features – {modelo_escolhido}")
-            plt.gca().invert_yaxis()
-            st.pyplot(fig)
-
-        X_pred = df_ml[colunas_features]
-        if scaler:
-            X_pred = scaler.transform(X_pred)
-
-        df_ml['prev_ml'] = model.predict(X_pred)
-        df_ml['residuo_ml'] = df_ml['Realizado'] - df_ml['prev_ml']
-        sigma = df_ml['residuo_ml'].std()
-        df_ml['ic_inf_ml'] = df_ml['prev_ml'] - 2.57 * sigma
-        df_ml['ic_sup_ml'] = df_ml['prev_ml'] + 2.57 * sigma
-
-        # Previsões futuras
-        ultimos_valores = df_ml.set_index('data')[['Realizado']].dropna().tail(4)['Realizado'].tolist()
-        previsoes_futuras = []
-        indice_futuro = len(df_ml)  # começa logo após o último ponto de treino
-
-        for i, row in df_futuro.iterrows():
-            mes_i = row['mes']
-            prev_classica = df_prev_futuro.loc[df_prev_futuro['data'] == row['data'], 'previsao'].values[0]
-            mm_i = np.mean(ultimos_valores[-janela_mm:]) if len(ultimos_valores) >= janela_mm else np.nan
-            std_i = np.std(ultimos_valores[-janela_mm:]) if len(ultimos_valores) >= janela_mm else np.nan
-
-            if np.isnan(mm_i):
-                continue
-
-            prev_arima_i = df_prev_arima_completo_2.loc[df_prev_arima_completo_2['data'] == row['data'], 'prev_arima'].values[0]
-            erro_c_a_i = (prev_arima_i / prev_classica) - 1
-
-            X_fut = construir_X_fut(
-                prev_classica, prev_arima_i, erro_c_a_i, mes_i, mm_i, std_i,
-                ultimos_valores, janela_mm, colunas_features,
-                indice_futuro, periodo_dominante
-            )
-
-           
-
-            if scaler:
-                X_fut = scaler.transform(X_fut)
-
-            pred = model.predict(X_fut)[0]
-            ultimos_valores.append(pred)
-
-            previsoes_futuras.append({
-                'data': row['data'],
-                'prev_ml': pred,
-                'ic_inf_ml': pred - 2.57 * sigma,
-                'ic_sup_ml': pred + 2.57 * sigma
-            })
-
-            indice_futuro += 1  # avança o tempo
-
-
-        df_ml_futuro = pd.DataFrame(previsoes_futuras)
-        df_ml_plot = pd.concat([df_ml[['data', 'prev_ml', 'ic_inf_ml', 'ic_sup_ml']].dropna(), df_ml_futuro])
-        print(df_ml_plot.tail(10))
-        print(df_filial.tail(10))
-        # Gráfico
-        st.markdown(f"### 🔍 Comparação: Previsão Clássica vs {modelo_escolhido}")
-        fig, ax = plt.subplots(figsize=(14, 6))
-
-        ax.bar(df_filial['data'], df_filial['Realizado'], color='lightgray', label='Realizado', width=20)
-        df_completo_classico = pd.concat([df_prev, df_prev_futuro])
-        ax.plot(df_completo_classico['data'], df_completo_classico['previsao'], 'o-', color='blue', label='Previsão Clássica')
-        ax.fill_between(df_completo_classico['data'], df_completo_classico['ic_inf'], df_completo_classico['ic_sup'], color='blue', alpha=0.2)
-
-        ax.plot(df_ml_plot['data'], df_ml_plot['prev_ml'], 'o-', label=f'Previsão {modelo_escolhido}', color='darkorange')
-        ax.fill_between(df_ml_plot['data'], df_ml_plot['ic_inf_ml'], df_ml_plot['ic_sup_ml'], color='orange', alpha=0.2)
-
-        ax.axvline(data_corte, color='red', linestyle='--', label='Corte')
-        datas_completas = pd.concat([df_filial['data'], df_prev_futuro['data']])
-        ax.set_xticks(datas_completas[::2])
-        ax.set_xticklabels(datas_completas[::2].dt.strftime('%Y-%m'), rotation=45)
-        ax.set_title(f"Comparação de Previsões – Filial {filial}")
-        ax.set_xlabel("Data")
-        ax.set_ylabel("Vendas")
-        ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1))
-        fig.tight_layout(rect=[0, 0, 0.85, 1])
-
-        st.pyplot(fig)
-
-            # Junta os dados
-        df_compara = pd.merge(df_ml[['data', 'prev_ml']], df_merged[['data', 'Realizado', 'previsao']], on='data')
-        df_compara = df_compara[df_compara['Realizado'].notnull()]
-
-        # Separa período pós-corte
-        df_pos_corte = df_compara[df_compara['data'] > data_corte].copy()
-
-        # Cálculo de erros gerais
-        df_compara['erro_clas'] = df_compara['Realizado'] - df_compara['previsao']
-        df_compara['erro_ml'] = df_compara['Realizado'] - df_compara['prev_ml']
-        df_compara['erro_pct_clas'] = df_compara['erro_clas'].abs() / (df_compara['Realizado'] + 1e-6)
-        df_compara['erro_pct_ml'] = df_compara['erro_ml'].abs() / (df_compara['Realizado'] + 1e-6)
-
-        # Métricas gerais
-        mape_clas = df_compara['erro_pct_clas'].mean()
-        mape_ml = df_compara['erro_pct_ml'].mean()
-        r2_clas = r2_score(df_compara['Realizado'], df_compara['previsao'])
-        r2_ml = r2_score(df_compara['Realizado'], df_compara['prev_ml'])
-
-        # Métricas pós-corte
-        if not df_pos_corte.empty:
-            df_pos_corte['erro_clas'] = df_pos_corte['Realizado'] - df_pos_corte['previsao']
-            df_pos_corte['erro_ml'] = df_pos_corte['Realizado'] - df_pos_corte['prev_ml']
-            df_pos_corte['erro_pct_clas'] = df_pos_corte['erro_clas'].abs() / (df_pos_corte['Realizado'] + 1e-6)
-            df_pos_corte['erro_pct_ml'] = df_pos_corte['erro_ml'].abs() / (df_pos_corte['Realizado'] + 1e-6)
-
-            mape_clas_pos = df_pos_corte['erro_pct_clas'].mean()
-            mape_ml_pos = df_pos_corte['erro_pct_ml'].mean()
-            r2_clas_pos = r2_score(df_pos_corte['Realizado'], df_pos_corte['previsao'])
-            r2_ml_pos = r2_score(df_pos_corte['Realizado'], df_pos_corte['prev_ml'])
-        else:
-            mape_clas_pos = mape_ml_pos = r2_clas_pos = r2_ml_pos = np.nan
-
-        # Exibição
-        st.markdown(f"### 📈 Comparativo de Métricas – Clássico vs {modelo_escolhido}")
-
-        st.markdown(f"""
-        <div style='font-size: 18px'>
-        🔵 <b>Modelo Clássico (Geral)</b><br>
-        - MAPE: <code>{mape_clas:.2%}</code><br>
-        - R²: <code>{r2_clas:.4f}</code><br><br>
-
-        🟠 <b>{modelo_escolhido} (Geral)</b><br>
-        - MAPE: <code>{mape_ml:.2%}</code><br>
-        - R²: <code>{r2_ml:.4f}</code>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Se houver período pós-corte, mostra também
-        if not np.isnan(mape_clas_pos):
-            st.markdown(f"""
-            <div style='font-size: 18px; margin-top: 2rem'>
-            📆 <b>Análise Pós-Corte (Data > {data_corte.date()})</b><br><br>
-
-            🔵 <b>Modelo Clássico (Pós-Corte)</b><br>
-            - MAPE: <code>{mape_clas_pos:.2%}</code><br>
-            - R²: <code>{r2_clas_pos:.4f}</code><br><br>
-
-            🟠 <b>{modelo_escolhido} (Pós-Corte)</b><br>
-            - MAPE: <code>{mape_ml_pos:.2%}</code><br>
-            - R²: <code>{r2_ml_pos:.4f}</code>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.warning("⚠️ Não há dados com realizado após a data de corte para análise pós-corte.")
-
-
- #############################################3
-
-    
-    
-    
-    # Métricas do modelo histórico
-    if len(df_teste) > 1:
-        r2 = r2_score(df_teste['Realizado'], df_teste['previsao'])
-        r2_display = f"{r2:.4f}" if r2 >= 0 else "Modelo pior que média (R² negativo)"
     else:
-        r2_display = "Insuficientes dados para cálculo do R²"
+        m_ml_pos = {'MAPE (%)': np.nan, 'R²': np.nan, 'RMSE': np.nan}
 
-    df_teste['erro'] = df_teste['Realizado'] - df_teste['previsao']
-    df_teste['erro_pct'] = df_teste['erro'].abs() / (df_teste['Realizado'] + 1e-6)
-    mape = df_teste['erro_pct'].mean()
+else:
+    m_ml_total = None
+    m_ml_pos = None
 
-    # Exibição das métricas
-    st.subheader("📊 Métricas de Avaliação (Período Realizado)")
-    st.markdown(f"- **MAPE**: {mape:.2%}")
-    st.markdown(f"- **R²**: {r2_display}")
 
-    # Tabela das previsões futuras
-    st.markdown("### 📋 Tabela de Previsões Futuras")
-    st.dataframe(df_prev_futuro[['data', 'previsao', 'ic_inf', 'ic_sup']].rename(columns={
-        'data': 'Data',
-        'previsao': 'Previsão',
-        'ic_inf': 'Limite Inferior (IC 95%)',
-        'ic_sup': 'Limite Superior (IC 95%)'
-    }).set_index('Data').style.format("{:,.2f}"))
+# ======================
+# EXIBE MÉTRICAS — TOTAL
+# ======================
+st.markdown("### 🟢 Período Completo")
 
-        # --- Análise da assertividade por horizonte t+ ---
-    df_check = pd.merge(df_filial[['data', 'Realizado']], df_prev, on='data', how='inner')
-    df_check = df_check[df_check['data'] > data_corte].copy()
+c1, c2, c3 = st.columns(3)
+c1.metric("Clássico — MAPE (%)", f"{m_class_total['MAPE (%)']:.2f}")
+c2.metric("Clássico — R²", f"{m_class_total['R²']:.3f}")
+c3.metric("Clássico — RMSE", f"{m_class_total['RMSE']:,.2f}")
 
-    if not df_check.empty:
-        df_check = df_check.sort_values('data').reset_index(drop=True)
-        df_check['t+'] = np.arange(1, len(df_check) + 1)
-        df_check['erro_pct'] = (df_check['Realizado'] - df_check['previsao']).abs() / (df_check['Realizado'] + 1e-6)
-        df_check['dentro_ic'] = df_check.apply(lambda row: row['ic_inf'] <= row['Realizado'] <= row['ic_sup'], axis=1)
+c1, c2, c3 = st.columns(3)
+c1.metric("ARIMA — MAPE (%)", f"{m_arima_total['MAPE (%)']:.2f}")
+c2.metric("ARIMA — R²", f"{m_arima_total['R²']:.3f}")
+c3.metric("ARIMA — RMSE", f"{m_arima_total['RMSE']:,.2f}")
 
-        # Gráfico de barras
-        st.markdown("### 📊 Erro por Horizonte de Previsão (t+) – Gráfico de Barras")
-        fig, ax = plt.subplots(figsize=(10, 5))
+if usar_ml:
+    c1, c2, c3 = st.columns(3)
+    c1.metric("ML — MAPE (%)", f"{m_ml_total['MAPE (%)']:.2f}")
+    c2.metric("ML — R²", f"{m_ml_total['R²']:.3f}")
+    c3.metric("ML — RMSE", f"{m_ml_total['RMSE']:,.2f}")
 
-        cores = ['green' if v else 'red' for v in df_check['dentro_ic']]
-        ax.bar(df_check['t+'], df_check['erro_pct'] * 100, color=cores)
+# ======================
+# EXIBE MÉTRICAS — PÓS-CORTE
+# ======================
+st.markdown("### 🔴 Após o Corte")
 
-        ax.set_xlabel("Horizonte da Previsão (t+)")
-        ax.set_ylabel("Erro Percentual (MAPE %)")
-        ax.set_title("Assertividade por t+ (Verde: dentro do IC | Vermelho: fora do IC)")
-        ax.set_xticks(df_check['t+'])
-        ax.set_ylim(0, max(df_check['erro_pct'] * 100) * 1.2)
-        ax.grid(axis='y', linestyle='--', alpha=0.5)
+c1, c2, c3 = st.columns(3)
+c1.metric("Clássico — MAPE (%)", f"{m_class_pos['MAPE (%)']:.2f}" if pd.notna(m_class_pos['MAPE (%)']) else "—")
+c2.metric("Clássico — R²", f"{m_class_pos['R²']:.3f}" if pd.notna(m_class_pos['R²']) else "—")
+c3.metric("Clássico — RMSE", f"{m_class_pos['RMSE']:,.2f}" if pd.notna(m_class_pos['RMSE']) else "—")
 
-        st.pyplot(fig)
+c1, c2, c3 = st.columns(3)
+c1.metric("ARIMA — MAPE (%)", f"{m_arima_pos['MAPE (%)']:.2f}" if pd.notna(m_arima_pos['MAPE (%)']) else "—")
+c2.metric("ARIMA — R²", f"{m_arima_pos['R²']:.3f}" if pd.notna(m_arima_pos['R²']) else "—")
+c3.metric("ARIMA — RMSE", f"{m_arima_pos['RMSE']:,.2f}" if pd.notna(m_arima_pos['RMSE']) else "—")
+
+if usar_ml:
+    c1, c2, c3 = st.columns(3)
+    c1.metric("ML — MAPE (%)", f"{m_ml_pos['MAPE (%)']:.2f}" if pd.notna(m_ml_pos['MAPE (%)']) else "—")
+    c2.metric("ML — R²", f"{m_ml_pos['R²']:.3f}" if pd.notna(m_ml_pos['R²']) else "—")
+    c3.metric("ML — RMSE", f"{m_ml_pos['RMSE']:,.2f}" if pd.notna(m_ml_pos['RMSE']) else "—")
+
+
+
+# ===============================
+# Logs (debug)
+# ===============================
+with st.expander("🛠️ Logs (debug)"):
+    st.write(f"Sigma clássico (ruído): {sigma_ruido:.6f}")
+    st.write(f"Sigma ARIMA (erro_log): {sigma_arima:.6f}")
+    st.write(f"ARIMA final: ({p},{d},{q}) — treino em {len(serie_residuo)} pontos")
+    st.write(f"Dados disponíveis: {df_filial['data'].min().date()} → {df_filial['data'].max().date()} | corte: {data_corte.date()}")
+
+
+
+# ======================================================
+# 🔁 ROLLING EVALUATION — 3 MODELOS (re-treinado a cada corte)
+# ======================================================
+st.markdown("## 🔁 Avaliação Rolling — 1 passo à frente (Realista)")
+
+rodar_rolling = st.button("📉 Rodar Avaliação Rolling (Realista)")
+
+if rodar_rolling:
+    st.warning("Executando rolling realista... isso pode demorar...")
+
+    # -----------------------
+    # CLÁSSICO
+    # -----------------------
+    df_roll_class = rolling_classico(
+        df_filial=df_filial,
+        tipo_tendencia=tipo_tendencia,
+        janela_minima=12
+    )
+
+    # -----------------------
+    # ARIMA
+    # -----------------------
+    df_roll_arima = rolling_arima(
+        df_filial=df_filial,
+        tipo_tendencia=tipo_tendencia,
+        arima_order=(p, d, q),
+        janela_minima=12
+    )
+
+    # -----------------------
+    # ML
+    # -----------------------
+    if usar_ml:
+        df_roll_ml = rolling_ml(
+            df_filial=df_filial,
+            tipo_tendencia=tipo_tendencia,
+            arima_order=(p, d, q),
+            lag_window=lag_window,
+            janela_minima=12
+        )
     else:
-        st.warning("⚠️ Não há dados de realizado após a data de corte para avaliar assertividade (t+).")
+        df_roll_ml = None
 
+    # -----------------------
+    # RESUMO MÉTRICAS
+    # -----------------------
+    st.subheader("📊 Resultado Rolling Realista (MAPE Médio)")
+
+    resumo = []
+    resumo.append({
+        "Modelo": "Clássico",
+        "MAPE (%)": df_roll_class["erro_pct"].mean()*100,
+        "Erro Abs Médio": df_roll_class["erro_abs"].mean()
+    })
+    resumo.append({
+        "Modelo": "ARIMA",
+        "MAPE (%)": df_roll_arima["erro_pct"].mean()*100,
+        "Erro Abs Médio": df_roll_arima["erro_abs"].mean()
+    })
+
+    if usar_ml:
+        resumo.append({
+            "Modelo": "ML",
+            "MAPE (%)": df_roll_ml["erro_pct"].mean()*100,
+            "Erro Abs Médio": df_roll_ml["erro_abs"].mean()
+        })
+
+    st.dataframe(pd.DataFrame(resumo))
+
+    # -----------------------
+    # DETALHES
+    # -----------------------
+    st.markdown("### 📘 Rolling — Clássico")
+    st.dataframe(df_roll_class)
+
+    st.markdown("### 📘 Rolling — ARIMA")
+    st.dataframe(df_roll_arima)
+
+    if usar_ml:
+        st.markdown("### 📘 Rolling — ML")
+        st.dataframe(df_roll_ml)
+
+
+    fig2, ax2 = plt.subplots(figsize=(16,6))
+
+    ax2.plot(df_roll_class["data_prev"], df_roll_class["erro_pct"]*100,
+            '-o', label="Clássico", color='black')
+
+    ax2.plot(df_roll_arima["data_prev"], df_roll_arima["erro_pct"]*100,
+            '-o', label="ARIMA", color='royalblue')
+
+    if usar_ml:
+        ax2.plot(df_roll_ml["data_prev"], df_roll_ml["erro_pct"]*100,
+                '-o', label="ML", color='purple')
+
+    ax2.set_title("Erro (%) por Corte — Rolling Evaluation")
+    ax2.set_xlabel("Data prevista")
+    ax2.set_ylabel("MAPE (%)")
+    ax2.legend()
+
+    st.pyplot(fig2)
+
+
+
+# ===============================
+# Diagnóstico LLM — Interpretação Automática
+# ===============================
+from openai import OpenAI
+
+st.markdown("---")
+st.header("🧩 Interpretação Automática das Previsões")
+
+context_file = st.file_uploader(
+    "📎 Anexar arquivo de contexto (opcional)",
+    type=["pdf"]
+)
+
+if st.button("🧠 Gerar Interpretação com LLM"):
+
+    with st.spinner("Analisando resultados e gerando interpretação..."):
+        try:
+            client = OpenAI(api_key=st.secrets["openai_api_key"])
+            context_text = ""
+
+            # ======================================================
+            # 🔧 BLOCO OPCIONAL — Rolling
+            # ======================================================
+            rolling_text = ""
+            rolling_explicacao = """
+A Avaliação Rolling simula como cada modelo teria performado caso estivéssemos,
+historicamente, em “tempo real”. Ou seja: em cada mês t, o modelo é treinado
+usando apenas os dados disponíveis até t, e faz uma previsão para t+1.
+
+Esse procedimento evita absolutamente qualquer vazamento e mede:
+• estabilidade temporal do modelo,
+• robustez da tendência e da sazonalidade,
+• sensibilidade a mudanças de regime,
+• consistência real do modelo ao longo da série.
+
+É um teste muito mais rigoroso e próximo da vida real do que avaliar apenas o
+período pós-corte atual.
+"""
+
+            # ======================================================
+            # MÉTRICAS DO ROLLING (se existirem)
+            # ======================================================
+            if "df_roll_class" in locals():
+
+                mape_class_roll = df_roll_class["erro_pct"].mean() * 100
+                err_class_roll = df_roll_class["erro_abs"].mean()
+
+                mape_arima_roll = df_roll_arima["erro_pct"].mean() * 100
+                err_arima_roll = df_roll_arima["erro_abs"].mean()
+
+                rolling_text += f"""
+### 📉 Avaliação Rolling (1 passo à frente — realista)
+
+- **Modelo Clássico**
+    • MAPE médio rolling = {mape_class_roll:.2f}%  
+    • Erro Absoluto Médio = {err_class_roll:.2f}
+
+- **Modelo ARIMA**
+    • MAPE médio rolling = {mape_arima_roll:.2f}%  
+    • Erro Absoluto Médio = {err_arima_roll:.2f}
+"""
+
+                if usar_ml and "df_roll_ml" in locals():
+                    mape_ml_roll = df_roll_ml["erro_pct"].mean() * 100
+                    err_ml_roll = df_roll_ml["erro_abs"].mean()
+
+                    rolling_text += f"""
+- **Modelo ML**
+    • MAPE médio rolling = {mape_ml_roll:.2f}%  
+    • Erro Absoluto Médio = {err_ml_roll:.2f}
+"""
+            else:
+                rolling_text = "Nenhuma avaliação rolling foi executada."
+
+            # ======================================================
+            # BLOCO ML
+            # ======================================================
+            if usar_ml:
+                bloco_ml = f"""
+- Modelo de Machine Learning (XGBoost):
+    • Lags utilizados: {lag_window}
+    • MAPE = {m_ml_total['MAPE (%)']:.2f}%
+    • R² = {m_ml_total['R²']:.3f}
+    • RMSE = {m_ml_total['RMSE']:.2f}
+"""
+            else:
+                bloco_ml = ""
+
+            # ======================================================
+            # PROMPT
+            # ======================================================
+            prompt = f"""
+Analise tecnicamente os resultados da previsão de vendas da filial "{filial}".
+
+Use as métricas abaixo:
+
+- Modelo Clássico: MAPE = {m_class_total['MAPE (%)']:.2f}%, R² = {m_class_total['R²']:.3f}, RMSE = {m_class_total['RMSE']:.2f}
+- Modelo ARIMA:    MAPE = {m_arima_total['MAPE (%)']:.2f}%, R² = {m_arima_total['R²']:.3f}, RMSE = {m_arima_total['RMSE']:.2f}
+{bloco_ml}
+
+### 🧠 O que analisar
+Produza uma interpretação clara e objetiva abordando:
+- Qual modelo performa melhor e por quais motivos;
+- Comportamento pós-corte: onde cada modelo acerta/erra;
+- Confiabilidade dos intervalos de confiança;
+- Possíveis causas para desvios (mudança de regime, sazonalidade atípica, rupturas);
+- Sugestões de melhoria (variáveis externas, sazonalidade dinâmica, janela de lags, ML etc.).
+
+### 🌀 Explicação da Avaliação Rolling
+{rolling_explicacao}
+
+### 📉 Análise Rolling (resultado realista)
+{rolling_text}
+
+Se houver arquivo de contexto, integre os fatos relevantes e gere insights práticos.
+Mantenha tom consultivo, direto e técnico.
+"""
+
+            # contexto
+            if context_file:
+                context_text = extract_context_text(context_file)
+
+            prompt += context_text[:15000] + "\n---\n"
+
+            # imagem
+            img_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Você é um consultor sênior especializado em séries temporais e gestão comercial."
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {
+                                "url": f"data:image/png;base64,{img_base64}"
+                            }}
+                        ]
+                    }
+                ],
+                temperature=0.4,
+                max_tokens=900
+            )
+
+            relatorio = response.choices[0].message.content
+
+            st.markdown("### 📊 Interpretação Gerada:")
+            st.markdown(relatorio)
+
+            st.session_state['relatorio_llm'] = relatorio
+
+        except Exception as e:
+            st.error(f"Erro ao gerar interpretação: {e}")
+
+
+# ===============================
+# 📄 PDF FINAL (sempre aparece depois de já existir relatório)
+# ===============================
+if 'relatorio_llm' in st.session_state:
+    st.markdown("---")
+    st.subheader("📄 Gerar PDF do Relatório Completo")
+
+    if st.button("📥 Baixar PDF"):
+        try:
+            pdf_bytes = gerar_pdf_completo(
+                filial,
+                m_class_total, m_arima_total, m_ml_total,
+                m_class_pos, m_arima_pos, m_ml_pos,
+                st.session_state['relatorio_llm'],
+                buf.getvalue()
+            )
+
+            st.download_button(
+                label="⬇️ Clique aqui para baixar",
+                data=pdf_bytes,
+                file_name=f"relatorio_previsao_{filial}.pdf",
+                mime="application/pdf"
+            )
+        except Exception as e:
+            st.error(f"Erro ao gerar PDF: {e}")

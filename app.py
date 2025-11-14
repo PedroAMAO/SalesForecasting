@@ -617,7 +617,7 @@ def treinar_arima_ruido(df_treino, arima_order):
 # 🔍 Otimização opcional do ARIMA via Rolling-Origin (cross-val)
 # ============================================================
 
-from itertools import product
+
 
 def otimizar_arima(df_treino,
                    grid_p=range(0,3),
@@ -1160,8 +1160,6 @@ df_A["erro_log"] = df_A["log_venda"] - df_A["yhat_log"]
 sigma_arima = float(df_A["erro_log"].std())
 if not np.isfinite(sigma_arima) or sigma_arima == 0:
     sigma_arima = 1e-6
-if not np.isfinite(sigma_arima) or sigma_arima == 0:
-    sigma_arima = 1e-6
 
 # ===============================
 # Aplicar Intervalo de Confiança no forecast completo (A + B + C)
@@ -1308,7 +1306,7 @@ ax.set_ylabel("Vendas" if not is_share else "Participação (%)")
 ax.legend()
 
 # =========================================================
-# 🔧 AJUSTE AUTOMÁTICO DO EIXO Y (40% ABAIXO DO MENOR VALOR)
+# 🔧 AJUSTE AUTOMÁTICO DO EIXO Y (5% ABAIXO DO MENOR VALOR)
 # =========================================================
 valores_min = []
 
@@ -1751,6 +1749,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

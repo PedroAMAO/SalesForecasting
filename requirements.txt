@@ -7,4 +7,5 @@ statsmodels
 reportlab
 openpyxl
 PyMuPDF
-scikit-learn
+scikit-learn>=1
+

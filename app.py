@@ -391,7 +391,7 @@ def calc_metrics(y_true, y_pred):
     return {
         'MAPE (%)': mean_absolute_percentage_error(y_true, y_pred) * 100.0,
         'R²': r2_score(y_true, y_pred),
-        'RMSE': np.sqrt(mean_squared_error(y, yhat))
+        'RMSE': np.sqrt(mean_squared_error(y_true, y_pred))
 
     }
 
@@ -1709,4 +1709,5 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 

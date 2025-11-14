@@ -1327,12 +1327,56 @@ buf.seek(0)
 # renderiza no streamlit
 st.pyplot(fig)
 
+# ======================================================
+# PREPARAÇÃO PARA CÁLCULO DAS MÉTRICAS
+# (deve ficar ANTES de calc_metrics e antes de chamar métricas)
+# ======================================================
+
+df_classico_valid = pd.merge(
+    df_filial[['data','alvo']], 
+    df_prev_classico_full[['data','previsao']], 
+    on='data', how='inner'
+)
+
+df_arima_valid = pd.merge(
+    df_filial[['data','alvo']], 
+    df_prev_arima_completo[['data','previsao']], 
+    on='data', how='inner'
+)
+
+if usar_ml:
+    df_ml_valid = pd.merge(
+        df_filial[['data','alvo']],
+        df_prev_ml_full[['data','previsao']],
+        on='data', how='inner'
+    )
 
 # ======================================================
 # 📐 MÉTRICAS — PRÉ e PÓS-CORTE — Todos os Modelos
 # ======================================================
 
+# ======================================================
+# 🔒 Blindagem — evitar NameError e merges quebrados
+# ======================================================
+
+# Se vier 'valor' ao invés de 'alvo'
+if "valor" in df_filial.columns and "alvo" not in df_filial.columns:
+    df_filial = df_filial.rename(columns={"valor": "alvo"})
+
+# Remover linhas sem 'alvo' nas validações (isso quebra métricas)
+df_classico_valid = df_classico_valid.dropna(subset=["alvo"])
+df_arima_valid = df_arima_valid.dropna(subset=["alvo"])
+
+# ML só deve ser tratado SE existir
+if usar_ml:
+    df_ml_valid = df_ml_valid.dropna(subset=["alvo"])
+else:
+    df_ml_valid = None
+
 st.markdown("## 📐 Métricas Comparativas dos Modelos")
+
+
+
 
 # --- Janelas ---
 mask_obs = df_classico_valid['alvo'].notnull()
@@ -1363,6 +1407,7 @@ if usar_ml:
     # total ML
     m_ml_total = calc_metrics(df_valid_ml['alvo'], df_valid_ml['previsao'])
 
+    
     # pós-corte ML
     mask_obs_ml = df_valid_ml['alvo'].notnull()
     mask_pos_ml = df_valid_ml['data'] > data_corte
@@ -1723,4 +1768,5 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 

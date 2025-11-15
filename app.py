@@ -103,7 +103,7 @@ def prever_classico_cached(df_filial, modelo_classico):
     return prever_full_classico(modelo_classico, df_filial)
 
 
-@st.cache_data(show_spinner=False)
+#@st.cache_data(show_spinner=False)
 def prever_arima_cached(modelo_classico, modelo_arima, df_filial):
     return prever_full_arima(modelo_classico, modelo_arima, df_filial)
 
@@ -2087,6 +2087,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

@@ -1201,7 +1201,7 @@ meses_a_frente = st.number_input("Meses à frente", min_value=1, max_value=24, v
 if "ordem_arima" not in st.session_state:
     st.session_state["ordem_arima"] = "1,0,0"
 
-# --- Campo de texto sempre usa session_state
+# --- Campo texto usa session_state sempre
 ordem_arima_txt = st.text_input("Ordem do ARIMA (p,d,q)", st.session_state["ordem_arima"])
 p, d, q = parse_arima_order(ordem_arima_txt)
 
@@ -1213,13 +1213,10 @@ if st.button("🚀 Rodar Otimização ARIMA"):
             metrica='mape'
         )
 
-        # Atualiza session_state e o campo automaticamente
-        nova_ordem = f"{melhor['p']},{melhor['d']},{melhor['q']}"
-        st.session_state["ordem_arima"] = nova_ordem
+        # Atualiza o campo – Streamlit atualiza sozinho
+        st.session_state["ordem_arima"] = f"{melhor['p']},{melhor['d']},{melhor['q']}"
 
-        # Força o campo a ser atualizado imediatamente
-        st.experimental_rerun()
-
+    # nada de st.experimental_rerun()
 # ---------------------------------------
 # Reconstrução dos resíduos (A + B + C)
 # ---------------------------------------
@@ -2179,6 +2176,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

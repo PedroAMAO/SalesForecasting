@@ -1262,11 +1262,11 @@ ax.plot(df_prev_classico_full['data'],
         df_prev_classico_full['previsao'],
         'o--', color='black', label='Clássico', zorder=4)
 
-mask_future = df_prev_classico_full['data'] >= data_corte
-ax.fill_between(df_prev_classico_full.loc[mask_future, 'data'],
-                df_prev_classico_full.loc[mask_future, 'ic_inf'],
-                df_prev_classico_full.loc[mask_future, 'ic_sup'],
-                alpha=0.12, color='black', zorder=2)
+# mask_future = df_prev_classico_full['data'] >= data_corte
+# ax.fill_between(df_prev_classico_full.loc[mask_future, 'data'],
+#                 df_prev_classico_full.loc[mask_future, 'ic_inf'],
+#                 df_prev_classico_full.loc[mask_future, 'ic_sup'],
+#                 alpha=0.12, color='black', zorder=2)
 
 # ------------------------------------------------------
 # ARIMA (linha + IC FUTURO apenas)
@@ -1276,11 +1276,11 @@ ax.plot(df_prev_arima_completo['data'],
         'o-', color='royalblue', linewidth=2,
         label='ARIMA (Resíduos)', zorder=5)
 
-mask_future_arima = df_prev_arima_completo['data'] >= data_corte
-ax.fill_between(df_prev_arima_completo.loc[mask_future_arima, 'data'],
-                df_prev_arima_completo.loc[mask_future_arima, 'ic_inf'],
-                df_prev_arima_completo.loc[mask_future_arima, 'ic_sup'],
-                alpha=0.18, color='royalblue', zorder=2)
+# mask_future_arima = df_prev_arima_completo['data'] >= data_corte
+# ax.fill_between(df_prev_arima_completo.loc[mask_future_arima, 'data'],
+#                 df_prev_arima_completo.loc[mask_future_arima, 'ic_inf'],
+#                 df_prev_arima_completo.loc[mask_future_arima, 'ic_sup'],
+#                 alpha=0.18, color='royalblue', zorder=2)
 
 # ------------------------------------------------------
 # ML (linha apenas, sem banda)
@@ -1571,6 +1571,257 @@ if rodar_rolling:
     st.pyplot(fig2)
 
 
+# ===============================
+# Usar melhor Modelo
+# ===============================
+
+usar_best_model = st.button("🏆 Usar Melhor Modelo (Rolling + IC Dinâmico)")
+
+def rolling_ml_h(df_filial, tipo_tendencia, arima_order, lag_window, max_h, janela_minima=12):
+
+    resultados = []
+    datas = df_filial["data"].unique()
+
+    for i in range(janela_minima, len(datas)-1):
+        data_corte = datas[i]
+
+        # (1) clássico até corte
+        modelo_classico, df_treino, _ = treinar_modelo_classico(
+            df_filial, data_corte, tipo_tendencia
+        )
+
+        # (2) arima até corte
+        modelo_arima = treinar_arima_ruido(df_treino, arima_order)
+
+        # (3) previsões histórico completo
+        df_cl = prever_full_classico(modelo_classico, df_filial)
+        df_ar = prever_full_arima(modelo_classico, modelo_arima, df_filial)
+
+        # (4) treina ML até corte
+        modelo_ml_obj = treinar_modelo_ml(
+            df_filial, df_cl, df_ar,
+            data_corte=data_corte,
+            lag_window=lag_window
+        )
+
+        # (5) prever H meses
+        df_fore = prever_ml(
+            modelo_ml_obj,
+            df_filial,
+            df_cl,
+            df_ar,
+            data_corte,
+            meses_a_frente=max_h
+        )
+
+        for h in range(1, max_h+1):
+            data_target = data_corte + pd.DateOffset(months=h)
+
+            if data_target not in df_fore['data'].values:
+                continue
+
+            y_pred = df_fore.loc[df_fore['data']==data_target,'previsao'].values[0]
+            y_real = df_filial.loc[df_filial['data']==data_target,'alvo'].values[0]
+
+            erro_pct = abs(y_real - y_pred) / max(1e-6, y_real)
+
+            resultados.append({
+                "h": h,
+                "real": y_real,
+                "prev": y_pred,
+                "erro_pct": erro_pct
+            })
+
+    return pd.DataFrame(resultados)
+
+
+def rolling_arima_h(df_filial, tipo_tendencia, arima_order, max_h, janela_minima=12):
+    resultados = []
+    datas = df_filial['data'].unique()
+
+    for i in range(janela_minima, len(datas) - 1):
+        data_corte = datas[i]
+
+        modelo_classico, df_treino, _ = treinar_modelo_classico(
+            df_filial, data_corte, tipo_tendencia
+        )
+        modelo_arima = treinar_arima_ruido(df_treino, arima_order)
+
+        for h in range(1, max_h+1):
+            data_target = data_corte + pd.DateOffset(months=h)
+            if data_target not in df_filial['data'].values:
+                continue
+
+            t_target = int(df_filial.loc[df_filial['data']==data_target,'t'].values[0])
+            mes_target = int(data_target.month)
+
+            yhat_log = modelo_classico.prever_log(t_target, mes_target)
+            ruido_h = modelo_arima.modelo.forecast(steps=h).iloc[-1]
+
+            y_pred = np.exp(yhat_log + ruido_h) - 1
+            y_real = df_filial.loc[df_filial['data']==data_target,'alvo'].values[0]
+
+            erro_pct = abs(y_real - y_pred) / max(1e-6, y_real)
+
+            resultados.append({
+                "h": h,
+                "real": y_real,
+                "prev": y_pred,
+                "erro_pct": erro_pct
+            })
+
+    return pd.DataFrame(resultados)
+
+def resumo_horizonte(df_roll_h, z=1.64):
+    if df_roll_h.empty:
+        return None
+
+    df = (
+        df_roll_h.groupby("h")["erro_pct"]
+        .agg(["mean","std"])
+        .rename(columns={"mean":"mean_erro","std":"std_erro"})
+        .reset_index()
+    )
+    df["e_bound"] = (df["mean_erro"] + z*df["std_erro"]).clip(lower=0.0)
+    return df
+
+def aplicar_ic_h(df_prev, resumo_h, data_corte):
+    if resumo_h is None:
+        return df_prev
+
+    df = df_prev.copy()
+
+    mask_future = (df["data"] > data_corte) & df["previsao"].notnull()
+    if not mask_future.any():
+        return df
+
+    # horizonte h de cada ponto
+    h_vals = (
+        (df.loc[mask_future,"data"].dt.year - data_corte.year) * 12 +
+        (df.loc[mask_future,"data"].dt.month - data_corte.month)
+    ).astype(int)
+    df.loc[mask_future,"h"] = h_vals
+
+    # merge (pode causar buracos)
+    df = df.merge(resumo_h[["h","e_bound"]], on="h", how="left")
+
+    # preencher faltantes para manter banda contínua
+    df["e_bound"] = df["e_bound"].fillna(method="ffill").fillna(method="bfill").fillna(0.0)
+
+    # aplicar IC
+    df.loc[mask_future, "ic_inf"] = df.loc[mask_future,"previsao"] * (1 - df.loc[mask_future,"e_bound"])
+    df.loc[mask_future, "ic_sup"] = df.loc[mask_future,"previsao"] * (1 + df.loc[mask_future,"e_bound"])
+
+    # remover negativos
+    df["ic_inf"] = df["ic_inf"].clip(lower=0.0)
+    df["ic_sup"] = df["ic_sup"].clip(lower=0.0)
+
+    return df.drop(columns=["h","e_bound"])
+
+if usar_best_model:
+
+    modelos_ativos = []
+    # clássico é sempre ativo
+    modelos_ativos.append(("Clássico", df_prev_classico_full))
+
+    # arima sempre ativo
+    modelos_ativos.append(("ARIMA", df_prev_arima_completo))
+
+    # ML opcional
+    if usar_ml:
+        modelos_ativos.append(("ML", df_prev_ml_full))
+
+    # roda ROLLING H para cada modelo
+    resultados = {}
+    for nome, _ in modelos_ativos:
+
+        if nome == "Clássico":
+            # TODO: construir versão rolling_h clássico
+            continue
+
+        elif nome == "ARIMA":
+            df_r = rolling_arima_h(
+                df_filial,
+                tipo_tendencia,
+                (p,d,q),
+                max_h=meses_a_frente
+            )
+            resultados[nome] = df_r
+
+        elif nome == "ML":
+            df_r = rolling_ml_h(
+                df_filial,
+                tipo_tendencia,
+                (p, d, q),
+                lag_window,
+                max_h=meses_a_frente
+            )
+            resultados["ML"] = df_r
+
+    # escolhe o campeão por menor erro médio no horizonte 1
+    ranking = {
+        nome: df["erro_pct"].mean() if not df.empty else np.inf
+        for nome, df in resultados.items()
+    }
+    melhor_nome = min(ranking, key=ranking.get)
+    st.success(f"🏆 Melhor modelo via Rolling: **{melhor_nome}**")
+
+    # resumo por horizonte
+    resumo_h = resumo_horizonte(resultados[melhor_nome], z=1.64)
+
+    # pega forecast do campeão
+    if melhor_nome == "ARIMA":
+        df_melhor_prev = df_prev_arima_completo.copy()
+    elif melhor_nome == "ML":
+        df_melhor_prev = df_prev_ml_full.copy()
+    else:
+        df_melhor_prev = df_prev_classico_full.copy()
+
+    # aplica IC especial
+    df_melhor_prev_ic = aplicar_ic_h(df_melhor_prev, resumo_h, data_corte)
+
+if usar_best_model:
+
+    # ... seu código de rolling H, resumo, aplicação IC etc
+
+    # ---------------------------
+    # 🎨 GRÁFICO VIP DO CAMPEÃO
+    # ---------------------------
+    st.markdown("## 🏆 Previsão com Intervalo de Confiança Dinâmico (Melhor Modelo)")
+
+    fig_best, ax_best = plt.subplots(figsize=(16,6))
+
+    ax_best.bar(df_filial['data'], df_filial['alvo'], width=20, alpha=0.3, color='gray')
+
+    ax_best.plot(df_melhor_prev_ic['data'], df_melhor_prev_ic['previsao'],
+                 '-o', color='green', label=f"{melhor_nome}")
+
+    mask_fut = (
+        (df_melhor_prev_ic['data'] > data_corte)
+        & df_melhor_prev_ic['previsao'].notnull()
+        & df_melhor_prev_ic['ic_inf'].notnull()
+    )
+
+    ax_best.fill_between(
+        df_melhor_prev_ic.loc[mask_fut,'data'],
+        df_melhor_prev_ic.loc[mask_fut,'ic_inf'],
+        df_melhor_prev_ic.loc[mask_fut,'ic_sup'],
+        alpha=0.25, color='green'
+)
+
+
+    ax_best.axvline(data_corte, linestyle='--', color='red')
+
+    ax_best.set_title(f"IC dinâmico por horizonte — Modelo {melhor_nome}")
+    ax_best.legend()
+
+    st.pyplot(fig_best)
+
+
+
+
+
+
 
 # ===============================
 # Diagnóstico LLM — Interpretação Automática
@@ -1756,6 +2007,8 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
+
 
 
 

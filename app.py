@@ -559,18 +559,20 @@ def to_month_start_date(ano, mes):
         return pd.NaT
 
 def clip_predictions(df, is_share):
-    if is_share:
-        return df.assign(
-            previsao=np.clip(df['previsao'], 0.0, 1.0),
-            ic_inf=np.clip(df['ic_inf'], 0.0, 1.0),
-            ic_sup=np.clip(df['ic_sup'], 0.0, 1.0)
-        )
-    else:
-        return df.assign(
-            previsao=np.clip(df['previsao'], 0.0, None),
-            ic_inf=np.clip(df['ic_inf'], 0.0, None),
-            ic_sup=np.clip(df['ic_sup'], 0.0, None)
-        )
+    df = df.copy()
+
+    # clip da previsão
+    df['previsao'] = np.clip(df['previsao'], 0.0, None)
+
+    # se não tiver IC, só devolve
+    if 'ic_inf' not in df.columns or 'ic_sup' not in df.columns:
+        return df
+
+    # se tiver IC, clipa eles também
+    df['ic_inf'] = np.clip(df['ic_inf'], 0.0, None)
+    df['ic_sup'] = np.clip(df['ic_sup'], 0.0, None)
+
+    return df
 
 def parse_arima_order(s):
     s = s.strip()
@@ -2089,6 +2091,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

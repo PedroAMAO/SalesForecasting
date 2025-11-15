@@ -1189,7 +1189,6 @@ saz_media = modelo_classico.saz_media
 # Previsão clássica (sem ARIMA) para todo órico
 df_prev_classico_ = prever_classico_cached(df_filial, modelo_classico)
 
-
 # ===============================
 # ARIMA nos resíduos (ENCAPSULADO)
 # ===============================
@@ -1198,24 +1197,38 @@ st.subheader("🔮 Previsão de Vendas Futuras")
 
 meses_a_frente = st.number_input("Meses à frente", min_value=1, max_value=24, value=6)
 
-usar_otimizacao = st.checkbox("🔍 Otimizar parâmetros do ARIMA automaticamente", value=False)
+st.markdown("### 🔍 Otimização Automática do ARIMA")
 
-if usar_otimizacao:
-    # rodamos o rolling-origin para escolher o melhor ARIMA
-    
-    melhor,resultado  = otimizar_arima(
-        df_treino=df_treino,
-        metrica='mape'
-    )
-    p, d, q = melhor['p'], melhor['d'], melhor['q']
-    st.success(f"Melhor ARIMA encontrado: ({p},{d},{q}) — erro médio = {melhor['erro']:.4f}")
-
+# 🔒 1. Recupera p,d,q da sessão, ou usa manual como padrão
+if "arima_auto" in st.session_state:
+    p, d, q = st.session_state["arima_auto"]
 else:
+    # Fallback manual inicial
     ordem_arima_txt = st.text_input("Ordem do ARIMA (p,d,q)", "1,0,0")
     p, d, q = parse_arima_order(ordem_arima_txt)
     st.info(f"Usando ARIMA manual: ({p},{d},{q})")
 
+# 🔘 2. Botão para otimização do ARIMA
+if st.button("🚀 Rodar Otimização ARIMA"):
+    with st.spinner("Buscando melhores parâmetros..."):
+        melhor, resultado = otimizar_arima(
+            df_treino=df_treino,
+            metrica='mape'
+        )
 
+        p, d, q = melhor["p"], melhor["d"], melhor["q"]
+        erro = melhor["erro"]
+
+        st.markdown(f"""
+        ### ⭐ Melhor ARIMA Encontrado
+        **p** = {p}  
+        **d** = {d}  
+        **q** = {q}  
+        **Erro médio:** {erro:.6f}
+        """)
+
+        # salva para reaproveitar nas próximas execuções
+        st.session_state["arima_auto"] = (p, d, q)
 # ---------------------------------------
 # treinar modelo ARIMA encapsulado
 # ---------------------------------------
@@ -2187,6 +2200,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

@@ -1321,6 +1321,38 @@ if usar_ml:
 # ======================================================
 # 🎨 GRÁFICO MASTER — Realizado vs Clássico vs ARIMA vs ML
 # ======================================================
+# ======================================================
+# 🔍 PASSO 1.4.2 — Validação e limpeza dos DFs de previsão
+# ======================================================
+
+def limpar_prev(df, nome):
+    df = df.copy()
+
+    # 1) manter apenas colunas essenciais
+    cols_ok = [c for c in df.columns if c in ['data', 'previsao', 'ic_inf', 'ic_sup', 'yhat_log']]
+    df = df[cols_ok]
+
+    # 2) remover NaNs de data ou previsão
+    df = df.dropna(subset=['data', 'previsao'])
+
+    # 3) remover duplicatas de meses
+    if df['data'].duplicated().any():
+        st.warning(f"⚠️ Atenção: {nome} tinha datas duplicadas. Removendo duplicatas automaticamente.")
+        df = df.drop_duplicates(subset=['data'], keep='last')
+
+    # 4) ordenar série temporal
+    df = df.sort_values('data').reset_index(drop=True)
+
+    return df
+
+df_prev_classico_full  = limpar_prev(df_prev_classico_full, "Clássico")
+df_prev_arima_completo = limpar_prev(df_prev_arima_completo, "ARIMA")
+if usar_ml:
+    df_prev_ml_full = limpar_prev(df_prev_ml_full, "ML")
+
+
+
+
 st.markdown("## 📊 Comparativo de Modelos — Filial " + filial)
 
 fig, ax = plt.subplots(figsize=(16, 6))
@@ -2089,6 +2121,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

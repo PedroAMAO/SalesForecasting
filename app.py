@@ -1239,9 +1239,10 @@ p, d, q = parse_arima_order(st.session_state["ordem_arima_valor"])
 
 # 6) Treina o ARIMA com p,d,q já limpos
 modelo_arima = treinar_arima_ruido_cached(
-    df_treino=df_treino,
-    ordem=(p, d, q)
+    df_treino,
+    (p, d, q)
 )
+
 
 df_prev_arima_ = prever_arima_cached(
     modelo_classico,
@@ -2209,6 +2210,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

@@ -58,6 +58,40 @@ def carregar_e_preparar_base(arquivo_bytes: bytes, nome_arquivo: str):
 
     return df_com_total
 
+# ==========================================================
+# CACHE dos modelos (clássico, ARIMA e ML)
+# ==========================================================
+
+@st.cache_data(show_spinner=False)
+def treinar_modelo_classico_cached(df_filial, data_corte, tipo_tendencia):
+    return treinar_modelo_classico(
+        df_filial=df_filial,
+        data_corte=data_corte,
+        tipo_tendencia=tipo_tendencia
+    )
+
+@st.cache_data(show_spinner=False)
+def treinar_arima_ruido_cached(df_treino, arima_order):
+    return treinar_arima_ruido(
+        df_treino=df_treino,
+        arima_order=arima_order
+    )
+
+@st.cache_data(show_spinner=False)
+def treinar_modelo_ml_cached(
+        df_filial,
+        df_prev_classico_full,
+        df_prev_arima_completo,
+        data_corte,
+        lag_window
+    ):
+    return treinar_modelo_ml(
+        df_filial=df_filial,
+        df_prev_classico_full=df_prev_classico_full,
+        df_prev_arima_completo=df_prev_arima_completo,
+        data_corte=data_corte,
+        lag_window=lag_window
+    )
 
 
 
@@ -151,15 +185,15 @@ def rolling_ml(df_filial, tipo_tendencia, arima_order, lag_window=6, janela_mini
             continue
 
         # 1) clássico até o corte
-        modelo_classico, df_treino, _ = treinar_modelo_classico(
+        modelo_classico, df_treino, _ = treinar_modelo_classico_cached(
             df_filial, data_corte, tipo_tendencia
         )
 
         # 2) ARIMA nos resíduos até o corte
-        modelo_arima = treinar_arima_ruido(df_treino, arima_order)
+        modelo_arima = treinar_arima_ruido_cached(df_treino, arima_order)
 
         # 3) treinar ML até o corte (idêntico ao gráfico)
-        modelo_ml_obj = treinar_modelo_ml(
+        modelo_ml_obj = treinar_modelo_ml_cached(
             df_filial=df_filial,
             df_prev_classico_full=prever_full_classico(modelo_classico, df_filial),
             df_prev_arima_completo=prever_full_arima(modelo_classico, modelo_arima, df_filial),
@@ -209,12 +243,12 @@ def rolling_arima(df_filial, tipo_tendencia, arima_order, janela_minima=12):
             continue
 
         # treina modelo clássico
-        modelo_classico, df_treino, _ = treinar_modelo_classico(
+        modelo_classico, df_treino, _ = treinar_modelo_classico_cached(
             df_filial, data_corte, tipo_tendencia
         )
 
         # treina ARIMA nos resíduos — igual ao gráfico
-        modelo_arima = treinar_arima_ruido(df_treino, arima_order)
+        modelo_arima = treinar_arima_ruido_cached(df_treino, arima_order)
 
         # t/mês do mês seguinte
         t_next = int(df_filial.loc[df_filial['data'] == data_target, 't'].values[0])
@@ -255,7 +289,7 @@ def rolling_classico(df_filial, tipo_tendencia, janela_minima=12):
             continue
 
         # treina o modelo clássico exatamente como no gráfico
-        modelo_classico, df_treino, _ = treinar_modelo_classico(
+        modelo_classico, df_treino, _ = treinar_modelo_classico_cached(
             df_filial, data_corte, tipo_tendencia
         )
 
@@ -1044,7 +1078,7 @@ tipo_tendencia = st.selectbox("📈 Tipo de Tendência", [ "Linear", "Quadrátic
 # ===============================
 # Tendência + sazonalidade (ENCAPSULADO)
 # ===============================
-modelo_classico, df_treino, df_real = treinar_modelo_classico(
+modelo_classico, df_treino, df_real = treinar_modelo_classico_cached(
     df_filial=df_filial,
     data_corte=data_corte,
     tipo_tendencia=tipo_tendencia
@@ -1097,7 +1131,7 @@ else:
 # ---------------------------------------
 # treinar modelo ARIMA encapsulado
 # ---------------------------------------
-modelo_arima = treinar_arima_ruido(df_treino, (p, d, q))
+modelo_arima = treinar_arima_ruido_cached(df_treino, (p, d, q))
 
 
 # ---------------------------------------
@@ -1230,7 +1264,7 @@ if usar_ml:
     lag_window = st.slider("Janela de lags (N)", min_value=3, max_value=12, value=6)
 
     # 1) Treina ML
-    modelo_ml_obj = treinar_modelo_ml(
+    modelo_ml_obj = treinar_modelo_ml_cached(
         df_filial=df_filial,
         df_prev_classico_full=df_prev_classico_full,
         df_prev_arima_completo=df_prev_arima_completo,
@@ -1601,19 +1635,19 @@ def rolling_ml_h(df_filial, tipo_tendencia, arima_order, lag_window, max_h, jane
         data_corte = datas[i]
 
         # (1) clássico até corte
-        modelo_classico, df_treino, _ = treinar_modelo_classico(
+        modelo_classico, df_treino, _ = treinar_modelo_classico_cached(
             df_filial, data_corte, tipo_tendencia
         )
 
         # (2) arima até corte
-        modelo_arima = treinar_arima_ruido(df_treino, arima_order)
+        modelo_arima = treinar_arima_ruido_cached(df_treino, arima_order)
 
         # (3) previsões histórico completo
         df_cl = prever_full_classico(modelo_classico, df_filial)
         df_ar = prever_full_arima(modelo_classico, modelo_arima, df_filial)
 
         # (4) treina ML até corte
-        modelo_ml_obj = treinar_modelo_ml(
+        modelo_ml_obj = treinar_modelo_ml_cached(
             df_filial, df_cl, df_ar,
             data_corte=data_corte,
             lag_window=lag_window
@@ -1657,10 +1691,10 @@ def rolling_arima_h(df_filial, tipo_tendencia, arima_order, max_h, janela_minima
     for i in range(janela_minima, len(datas) - 1):
         data_corte = datas[i]
 
-        modelo_classico, df_treino, _ = treinar_modelo_classico(
+        modelo_classico, df_treino, _ = treinar_modelo_classico_cached(
             df_filial, data_corte, tipo_tendencia
         )
-        modelo_arima = treinar_arima_ruido(df_treino, arima_order)
+        modelo_arima = treinar_arima_ruido_cached(df_treino, arima_order)
 
         for h in range(1, max_h+1):
             data_target = data_corte + pd.DateOffset(months=h)
@@ -2022,6 +2056,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

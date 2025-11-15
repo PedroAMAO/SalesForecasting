@@ -1199,16 +1199,11 @@ meses_a_frente = st.number_input("Meses à frente", min_value=1, max_value=24, v
 
 st.markdown("### 🔍 Otimização Automática do ARIMA")
 
-# 🔒 1. Recupera p,d,q da sessão, ou usa manual como padrão
-if "arima_auto" in st.session_state:
-    p, d, q = st.session_state["arima_auto"]
-else:
-    # Fallback manual inicial
-    ordem_arima_txt = st.text_input("Ordem do ARIMA (p,d,q)", "1,0,0")
-    p, d, q = parse_arima_order(ordem_arima_txt)
-    st.info(f"Usando ARIMA manual: ({p},{d},{q})")
+# Campo manual sempre presente
+ordem_arima_txt = st.text_input("Ordem do ARIMA (p,d,q)", "1,0,0")
+p, d, q = parse_arima_order(ordem_arima_txt)
 
-# 🔘 2. Botão para otimização do ARIMA
+# Botão para otimizar
 if st.button("🚀 Rodar Otimização ARIMA"):
     with st.spinner("Buscando melhores parâmetros..."):
         melhor, resultado = otimizar_arima(
@@ -1217,18 +1212,17 @@ if st.button("🚀 Rodar Otimização ARIMA"):
         )
 
         p, d, q = melhor["p"], melhor["d"], melhor["q"]
-        erro = melhor["erro"]
 
-        st.markdown(f"""
-        ### ⭐ Melhor ARIMA Encontrado
-        **p** = {p}  
-        **d** = {d}  
-        **q** = {q}  
-        **Erro médio:** {erro:.6f}
-        """)
+        # Atualiza o campo automaticamente
+        nova_ordem = f"{p},{d},{q}"
+        st.session_state["ordem_arima_txt"] = nova_ordem
 
-        # salva para reaproveitar nas próximas execuções
-        st.session_state["arima_auto"] = (p, d, q)
+        st.success(f"Parâmetros otimizados aplicados: ({nova_ordem})")
+
+# Manter sincronizado quando o campo mudar
+if "ordem_arima_txt" in st.session_state:
+    ordem_arima_txt = st.session_state["ordem_arima_txt"]
+    p, d, q = parse_arima_order(ordem_arima_txt)
 # ---------------------------------------
 # treinar modelo ARIMA encapsulado
 # ---------------------------------------
@@ -2200,6 +2194,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

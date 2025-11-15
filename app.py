@@ -31,7 +31,8 @@ def carregar_e_preparar_base(arquivo_bytes: bytes, nome_arquivo: str):
     base['ano'] = pd.to_numeric(base['ano'], errors='coerce').astype('Int64')
     base['mes'] = pd.to_numeric(base['mes'], errors='coerce').astype('Int64')
     base['realizado'] = pd.to_numeric(base['realizado'], errors='coerce')
-    base['filial'] = base['filial'].astype(str).strip()
+    base['filial'] = base['filial'].astype(str).str.strip()
+  
 
     # data mensal
     base["data"] = [
@@ -2021,6 +2022,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

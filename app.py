@@ -1232,7 +1232,7 @@ if st.button("🚀 Otimizar ARIMA"):
         st.session_state["ordem_arima_valor"] = nova_ordem
 
         # O campo se atualiza sozinho na próxima renderização
-        st.experimental_rerun()   # força refresh limpo do campo
+       # st.experimental_rerun()   # força refresh limpo do campo
 
 # 5) Usa SEMPRE o valor interno (a fonte da verdade)
 p, d, q = parse_arima_order(st.session_state["ordem_arima_valor"])
@@ -2210,6 +2210,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

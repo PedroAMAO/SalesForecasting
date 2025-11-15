@@ -49,6 +49,44 @@ st.title("📈 Previsão com Decomposição Log + Tendência + Sazonalidade")
 # ===============================
 # Utils
 # ===============================
+@st.cache_data(show_spinner=False)
+def carregar_e_preparar_base(arquivo_bytes: bytes, nome_arquivo: str):
+    import io
+    file_like = io.BytesIO(arquivo_bytes)
+
+    base = safe_sheet_read(file_like)
+    base = normalize_columns(base)
+
+    # garante tipos
+    base['ano'] = pd.to_numeric(base['ano'], errors='coerce').astype('Int64')
+    base['mes'] = pd.to_numeric(base['mes'], errors='coerce').astype('Int64')
+    base['realizado'] = pd.to_numeric(base['realizado'], errors='coerce')
+    base['filial'] = base['filial'].astype(str).strip()
+
+    # data mensal
+    base["data"] = [
+        to_month_start_date(a, m) for a, m in zip(base["ano"], base["mes"])
+    ]
+    base = base.dropna(subset=["data"]).sort_values("data")
+
+    # total por data e linha "Total"
+    df_total = base.groupby("data", as_index=False)["realizado"].sum()
+    df_total["filial"] = "Total"
+    df_total["ano"] = df_total["data"].dt.year
+    df_total["mes"] = df_total["data"].dt.month
+
+    df_com_total = pd.concat([base, df_total], ignore_index=True)
+
+    soma_filiais = (
+        df_com_total[df_com_total["filial"] != "Total"]
+        .groupby("data")["realizado"]
+        .transform("sum")
+    )
+    df_com_total["total_por_data"] = soma_filiais
+    df_com_total["pct_filial"] = df_com_total["realizado"] / df_com_total["total_por_data"]
+
+    return df_com_total
+
 def prever_full_classico(modelo_classico, df_filial):
     """Gera previsão clássica (tend + saz + IC) somente no histórico."""
     prevs = []
@@ -957,34 +995,10 @@ if not arquivo:
 # Carregamento e preparo base
 # ===============================
 with st.spinner("Lendo e preparando os dados..."):
-    base = safe_sheet_read(arquivo)
-    base = normalize_columns(base)
-
-    # garante tipos
-    base['ano'] = pd.to_numeric(base['ano'], errors='coerce').astype('Int64')
-    base['mes'] = pd.to_numeric(base['mes'], errors='coerce').astype('Int64')
-    base['realizado'] = pd.to_numeric(base['realizado'], errors='coerce')
-    base['filial'] = base['filial'].astype(str).str.strip()
-
-    # data mensal
-    base['data'] = [to_month_start_date(a, m) for a, m in zip(base['ano'], base['mes'])]
-    base = base.dropna(subset=['data']).sort_values('data')
-
-    # total por data e linha "Total"
-    df_total = base.groupby('data', as_index=False)['realizado'].sum()
-    df_total['filial'] = 'Total'
-    df_total['ano'] = df_total['data'].dt.year
-    df_total['mes'] = df_total['data'].dt.month
-
-    df_com_total = pd.concat([base, df_total], ignore_index=True)
-    # total de filiais (exclui 'Total' pra evitar dobrar a soma)
-    soma_filiais = (
-        df_com_total[df_com_total['filial'] != 'Total']
-        .groupby('data')['realizado']
-        .transform('sum')
+    df_com_total = carregar_e_preparar_base(
+        arquivo_bytes=arquivo.getvalue(),
+        nome_arquivo=arquivo.name
     )
-    df_com_total['total_por_data'] = soma_filiais
-    df_com_total['pct_filial'] = df_com_total['realizado'] / df_com_total['total_por_data']
 
 # ===============================
 # Seleções
@@ -2007,6 +2021,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

@@ -1674,7 +1674,7 @@ if usar_ml:
 #st.markdown("## 🔁 Avaliação Rolling — 1 passo à frente (Realista)")
 
 #rodar_rolling = st.button("📉 Rodar Avaliação Rolling (Realista)")
-
+rodar_rolling = False
 if rodar_rolling:
     st.warning("Executando rolling realista... isso pode demorar...")
 
@@ -2214,6 +2214,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

@@ -1202,21 +1202,21 @@ meses_a_frente = st.number_input("Meses à frente", min_value=1, max_value=24, v
 
 # 1) Estado interno (não é widget!)
 if "ordem_arima_valor" not in st.session_state:
-    st.session_state["ordem_arima_valor"] = "1,0,0"
+    st.session_state["ordem_arima_valor"] = "0,0,0"
 
-# 2) Campo do usuário (widget)
-ordem_arima_txt = st.text_input(
-    "Ordem do ARIMA (p,d,q)",
-    value=st.session_state["ordem_arima_valor"],   # sempre puxa do estado interno
-    key="arima_input_fresco"                       # key única
-)
+# # 2) Campo do usuário (widget)
+# ordem_arima_txt = st.text_input(
+#     "Ordem do ARIMA (p,d,q)",
+#     value=st.session_state["ordem_arima_valor"],   # sempre puxa do estado interno
+#     key="arima_input_fresco"                       # key única
+# )
 
 # 3) Converte o texto em p,d,q
-try:
-    p, d, q = parse_arima_order(ordem_arima_txt)
-except:
-    st.error("Formato inválido. Use p,d,q")
-    st.stop()
+# try:
+#     p, d, q = parse_arima_order(ordem_arima_txt)
+# except:
+#     st.error("Formato inválido. Use p,d,q")
+#     st.stop()
 
 # 4) Botão de otimização
 if st.button("🚀 Otimizar ARIMA"):
@@ -1230,7 +1230,11 @@ if st.button("🚀 Otimizar ARIMA"):
 
         # Atualiza SOMENTE o estado interno (jamais o widget!)
         st.session_state["ordem_arima_valor"] = nova_ordem
-
+        st.success(
+        f"**Parâmetros ótimos encontrados:** (p,d,q) = "
+        f"**({melhor['p']}, {melhor['d']}, {melhor['q']})** — "
+        f"erro médio: **{melhor['erro']:.4f}**"
+    )
         # O campo se atualiza sozinho na próxima renderização
        # st.experimental_rerun()   # força refresh limpo do campo
 
@@ -2210,6 +2214,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

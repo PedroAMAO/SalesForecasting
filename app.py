@@ -19,6 +19,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Tabl
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 from xgboost import XGBRegressor
+
 @st.cache_data(show_spinner=False)
 def carregar_e_preparar_base(arquivo_bytes: bytes, nome_arquivo: str):
     import io
@@ -93,6 +94,37 @@ def treinar_modelo_ml_cached(
         lag_window=lag_window
     )
 
+# ==========================================================
+# CACHE das previsões (Clássico, ARIMA e ML)
+# ==========================================================
+
+@st.cache_data(show_spinner=False)
+def prever_classico_cached(df_filial, modelo_classico):
+    return prever_full_classico(modelo_classico, df_filial)
+
+
+@st.cache_data(show_spinner=False)
+def prever_arima_cached(modelo_classico, modelo_arima, df_filial):
+    return prever_full_arima(modelo_classico, modelo_arima, df_filial)
+
+
+@st.cache_data(show_spinner=False)
+def prever_ml_cached(modelo_ml_obj,
+                     df_filial,
+                     df_prev_classico_full,
+                     df_prev_arima_completo,
+                     data_corte,
+                     meses_a_frente,
+                     is_share):
+    return prever_ml(
+        modelo_ml_obj,
+        df_filial,
+        df_prev_classico_full,
+        df_prev_arima_completo,
+        data_corte,
+        meses_a_frente,
+        is_share=is_share
+    )
 
 
 
@@ -195,21 +227,22 @@ def rolling_ml(df_filial, tipo_tendencia, arima_order, lag_window=6, janela_mini
         # 3) treinar ML até o corte (idêntico ao gráfico)
         modelo_ml_obj = treinar_modelo_ml_cached(
             df_filial=df_filial,
-            df_prev_classico_full=prever_full_classico(modelo_classico, df_filial),
-            df_prev_arima_completo=prever_full_arima(modelo_classico, modelo_arima, df_filial),
+            df_prev_classico_full=prever_classico_cached(df_filial, modelo_classico),
+            df_prev_arima_completo= prever_arima_cached(modelo_classico, modelo_arima, df_filial),
             data_corte=data_corte,
             lag_window=lag_window
         )
 
         # 4) prever o mês seguinte
-        df_prev_ml_full = prever_ml(
-            modelo_ml_obj,
-            df_filial,
-            prever_full_classico(modelo_classico, df_filial),
-            prever_full_arima(modelo_classico, modelo_arima, df_filial),
-            data_corte,
-            meses_a_frente=1
-        )
+        df_prev_ml_full = prever_ml_cached(
+                modelo_ml_obj,
+                df_filial,
+                df_prev_classico_full,
+                df_prev_arima_completo,
+                data_corte,
+                meses_a_frente,
+                is_share
+            )
 
         y_pred = df_prev_ml_full.loc[
             df_prev_ml_full["data"] == data_target, "previsao"
@@ -1089,19 +1122,8 @@ sigma_ruido = modelo_classico.sigma_ruido
 saz_media = modelo_classico.saz_media
 
 # Previsão clássica (sem ARIMA) para todo histórico
-prevs = []
-for _, row in df_filial.iterrows():
-    t_i = int(row['t'])
-    m_i = int(row['mes_num'])
-    y, ic_inf, ic_sup, _ = modelo_classico.prever_nivel_com_ic(t_i, m_i)
-    prevs.append({
-        'data': row['data'],
-        'previsao': y,
-        'ic_inf': ic_inf,
-        'ic_sup': ic_sup
-    })
+df_prev_classico_hist = prever_classico_cached(df_filial, modelo_classico)
 
-df_prev_classico_hist = pd.DataFrame(prevs)
 
 # ===============================
 # ARIMA nos resíduos (ENCAPSULADO)
@@ -1132,6 +1154,12 @@ else:
 # treinar modelo ARIMA encapsulado
 # ---------------------------------------
 modelo_arima = treinar_arima_ruido_cached(df_treino, (p, d, q))
+# Histórico ARIMA (A) via cache — NÃO recalcular manualmente
+df_prev_arima_hist = prever_arima_cached(
+    modelo_classico,
+    modelo_arima,
+    df_filial
+)
 
 
 # ---------------------------------------
@@ -1139,8 +1167,8 @@ modelo_arima = treinar_arima_ruido_cached(df_treino, (p, d, q))
 # ---------------------------------------
 serie_residuo = df_treino.set_index("data")["ruido"]
 
-tam_A = len(df_treino)
-tam_B = len(df_filial) - len(df_treino)
+tam_A = modelo_arima.n_treino
+tam_B = len(df_filial) - tam_A
 tam_C = meses_a_frente
 
 # resíduos fitted (A)
@@ -1166,60 +1194,57 @@ df_all = pd.DataFrame({
     'ruido_prev': residuos_todos.values
 })
 
-# reconstruir previsões completas
+
+# ===============================
+# Reconstruir previsão ARIMA completa (A + B + C)
+# ===============================
 prevs_arima_full = []
 for _, row in df_all.iterrows():
-    t_i = int(row['t'])
-    m_i = int(row['mes_num'])
-
-    tend_saz_log = modelo_classico.prever_log(t_i, m_i)
-    ruido_i = float(row['ruido_prev'])
-
-    yhat_log = tend_saz_log + ruido_i
-
+    yhat_log = modelo_classico.prever_log(int(row['t']), int(row['mes_num'])) + row['ruido_prev']
     prevs_arima_full.append({
         'data': row['data'],
-        'yhat_log': yhat_log,
-        'previsao': np.exp(yhat_log) - 1.0
+        'previsao': np.exp(yhat_log) - 1.0,
+        'yhat_log': yhat_log
     })
 
 df_prev_arima_completo = pd.DataFrame(prevs_arima_full)
-# ===============================
-# Sigma do ARIMA (somente período A, sem vazamento)
-# ===============================
 
-# 1) Reconstruir tendência + sazonalidade no período A
-df_A = df_treino.copy()
+# # ===============================
+# # Sigma do ARIMA (somente período A, sem vazamento)
+# # ===============================
 
-df_A["tend_saz_log"] = [
-    modelo_classico.prever_log(int(row.t), int(row.data.month))
-    for _, row in df_A.iterrows()
-]
+# # 1) Reconstruir tendência + sazonalidade no período A
+# df_A = df_treino.copy()
 
-# 2) Adiciona o ruído fitted (ARIMA) — alinhado pelo índice
-df_A["ruido_fitted"] = residuos_A.values
+# df_A["tend_saz_log"] = [
+#     modelo_classico.prever_log(int(row.t), int(row.data.month))
+#     for _, row in df_A.iterrows()
+# ]
 
-# 3) Reconstrói o yhat no log
-df_A["yhat_log"] = df_A["tend_saz_log"] + df_A["ruido_fitted"]
+# # 2) Adiciona o ruído fitted (ARIMA) — alinhado pelo índice
+# df_A["ruido_fitted"] = residuos_A.values
 
-# 4) Cálculo do erro no log somente na área de treino
-df_A["erro_log"] = df_A["log_venda"] - df_A["yhat_log"]
+# # 3) Reconstrói o yhat no log
+# df_A["yhat_log"] = df_A["tend_saz_log"] + df_A["ruido_fitted"]
 
-# 5) Sigma baseado somente no treino
-sigma_arima = float(df_A["erro_log"].std())
-if not np.isfinite(sigma_arima) or sigma_arima == 0:
-    sigma_arima = 1e-6
+# # 4) Cálculo do erro no log somente na área de treino
+# df_A["erro_log"] = df_A["log_venda"] - df_A["yhat_log"]
+
+# # 5) Sigma baseado somente no treino
+# sigma_arima = float(df_A["erro_log"].std())
+# if not np.isfinite(sigma_arima) or sigma_arima == 0:
+#     sigma_arima = 1e-6
 
 # ===============================
 # Aplicar Intervalo de Confiança no forecast completo (A + B + C)
-# ===============================
-df_prev_arima_completo["ic_inf"] = (
-    np.exp(df_prev_arima_completo["yhat_log"] - 2.57 * sigma_arima) - 1.0
-)
+# # ===============================
+# df_prev_arima_completo["ic_inf"] = (
+#     np.exp(df_prev_arima_completo["yhat_log"] - 2.57 * sigma_arima) - 1.0
+# )
 
-df_prev_arima_completo["ic_sup"] = (
-    np.exp(df_prev_arima_completo["yhat_log"] + 2.57 * sigma_arima) - 1.0
-)
+# df_prev_arima_completo["ic_sup"] = (
+#     np.exp(df_prev_arima_completo["yhat_log"] + 2.57 * sigma_arima) - 1.0
+# )
 
 
 # Junta clássico (histórico) + futuro clássico sem ARIMA
@@ -1241,8 +1266,12 @@ for i, dta in enumerate(datas_fut):
     })
 df_prev_futuro_classico = pd.DataFrame(fut)
 
-df_prev_classico_hist = df_prev_classico_hist.sort_values('data')
-df_prev_classico_full = pd.concat([df_prev_classico_hist, df_prev_futuro_classico], ignore_index=True)
+df_prev_classico_full = pd.concat(
+    [df_prev_classico_hist, df_prev_futuro_classico],
+    ignore_index=True
+)
+
+df_prev_classico_full = clip_predictions(df_prev_classico_full, is_share)
 
 # Clip de previsões conforme o modo (R$ vs Share)
 is_share = (modelo_realizado == 'Real Share %')
@@ -1273,14 +1302,15 @@ if usar_ml:
     )
 
     # 2) Faz toda previsao (histórico + futuro)
-    df_prev_ml_full = prever_ml(
-        modelo_ml_obj,
-        df_filial,
-        df_prev_classico_full,
-        df_prev_arima_completo,
-        data_corte,
-        meses_a_frente
-    )
+    df_prev_ml_full = prever_ml_cached(
+            modelo_ml_obj,
+            df_filial,
+            df_prev_classico_full,
+            df_prev_arima_completo,
+            data_corte,
+            meses_a_frente,
+            is_share
+        )
 
     # 3) Clipa se share
     df_prev_ml_full = clip_predictions(df_prev_ml_full, is_share)
@@ -1643,8 +1673,8 @@ def rolling_ml_h(df_filial, tipo_tendencia, arima_order, lag_window, max_h, jane
         modelo_arima = treinar_arima_ruido_cached(df_treino, arima_order)
 
         # (3) previsões histórico completo
-        df_cl = prever_full_classico(modelo_classico, df_filial)
-        df_ar = prever_full_arima(modelo_classico, modelo_arima, df_filial)
+        df_cl = prever_classico_cached(df_filial, modelo_classico)
+        df_ar =  prever_arima_cached(modelo_classico, modelo_arima, df_filial)
 
         # (4) treina ML até corte
         modelo_ml_obj = treinar_modelo_ml_cached(
@@ -1654,13 +1684,14 @@ def rolling_ml_h(df_filial, tipo_tendencia, arima_order, lag_window, max_h, jane
         )
 
         # (5) prever H meses
-        df_fore = prever_ml(
+        df_fore = prever_ml_cached(
             modelo_ml_obj,
             df_filial,
-            df_cl,
-            df_ar,
+            df_prev_classico_full,
+            df_prev_arima_completo,
             data_corte,
-            meses_a_frente=max_h
+            meses_a_frente,
+            is_share
         )
 
         for h in range(1, max_h+1):
@@ -2056,6 +2087,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

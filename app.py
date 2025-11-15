@@ -19,9 +19,9 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Tabl
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 #from xgboost import XGBRegressor
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.ensemble import HistGradientBoostingRegressor
-
+#from sklearn.ensemble import GradientBoostingRegressor
+#from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.ensemble import RandomForestRegressor
 
 @st.cache_data(show_spinner=False)
 def carregar_e_preparar_base(arquivo_bytes: bytes, nome_arquivo: str):
@@ -266,10 +266,15 @@ def rolling_ml(df_filial, tipo_tendencia, arima_order,
         # ============================
         
 
-        modelo_ml = HistGradientBoostingRegressor(
-            learning_rate=0.1,
-            max_depth=3,
-            max_iter=200,
+        
+
+        modelo_ml = RandomForestRegressor(
+            n_estimators=500,       # mais árvores = mais estabilidade
+            max_depth=None,        # deixa a floresta aprender padrões complexos
+            min_samples_split=2,
+            min_samples_leaf=1,
+            max_features="sqrt",   # padrão sólido pra problemas tabulares
+            n_jobs=-1,             # usa todos os núcleos (Streamlit Cloud aceita)
             random_state=42
         )
 
@@ -992,12 +997,15 @@ def treinar_modelo_ml(df_filial, df_prev_classico_full, df_prev_arima_completo,
 
     
 
-    modelo_ml = HistGradientBoostingRegressor(
-        learning_rate=0.05,
-        max_depth=4,
-        max_iter=300,
-        random_state=42
-    )
+    modelo_ml = RandomForestRegressor(
+            n_estimators=500,       # mais árvores = mais estabilidade
+            max_depth=None,        # deixa a floresta aprender padrões complexos
+            min_samples_split=2,
+            min_samples_leaf=1,
+            max_features="sqrt",   # padrão sólido pra problemas tabulares
+            n_jobs=-1,             # usa todos os núcleos (Streamlit Cloud aceita)
+            random_state=42
+        )
 
 
     modelo_ml.fit(df_train[feature_cols], df_train['alvo'])
@@ -2172,6 +2180,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

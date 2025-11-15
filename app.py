@@ -1278,8 +1278,6 @@ df_prev_classico_full = pd.concat(
 
 df_prev_classico_full = clip_predictions(df_prev_classico_full, is_share)
 
-
-df_prev_classico_full = clip_predictions(df_prev_classico_full, is_share)
 df_prev_arima_completo = clip_predictions(df_prev_arima_completo, is_share)
 
 # ============================================================
@@ -1540,14 +1538,14 @@ if usar_ml:
     c3.metric("ML — RMSE", f"{m_ml_pos['RMSE']:,.2f}" if pd.notna(m_ml_pos['RMSE']) else "—")
 
 
-# ===============================
-# Logs (debug)
-# ===============================
-with st.expander("🛠️ Logs (debug)"):
-    st.write(f"Sigma clássico (ruído): {sigma_ruido:.6f}")
-    st.write(f"Sigma ARIMA (erro_log): {sigma_arima:.6f}")
-    st.write(f"ARIMA final: ({p},{d},{q}) — treino em {len(serie_residuo)} pontos")
-    st.write(f"Dados disponíveis: {df_filial['data'].min().date()} → {df_filial['data'].max().date()} | corte: {data_corte.date()}")
+# # ===============================
+# # Logs (debug)
+# # ===============================
+# with st.expander("🛠️ Logs (debug)"):
+#     st.write(f"Sigma clássico (ruído): {sigma_ruido:.6f}")
+#     st.write(f"Sigma ARIMA (erro_log): {sigma_arima:.6f}")
+#     st.write(f"ARIMA final: ({p},{d},{q}) — treino em {len(serie_residuo)} pontos")
+#     st.write(f"Dados disponíveis: {df_filial['data'].min().date()} → {df_filial['data'].max().date()} | corte: {data_corte.date()}")
 
 
 
@@ -2091,6 +2089,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

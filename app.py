@@ -1458,33 +1458,31 @@ st.pyplot(fig)
 if "valor" in df_filial.columns and "alvo" not in df_filial.columns:
     df_filial = df_filial.rename(columns={"valor": "alvo"})
 
-# 2) Montar dataframes alinhados (somente datas em comum)
-df_classico_valid = (
-    df_filial[['data', 'alvo']]
-    .merge(df_prev_classico_full[['data', 'previsao']], on='data', how='inner')
-    .dropna(subset=['alvo', 'previsao'])
-    .rename(columns={'previsao': 'prev_class'})
-)
 
-df_arima_valid = (
-    df_filial[['data', 'alvo']]
-    .merge(df_prev_arima_completo[['data', 'previsao']], on='data', how='inner')
-    .dropna(subset=['alvo', 'previsao'])
-    .rename(columns={'previsao': 'prev_arima'})
-)
-
-df_ml_valid = None
-if usar_ml:
-    df_ml_valid = (
+def alinhar(df_filial, df_prev, nome):
+    df = (
         df_filial[['data', 'alvo']]
-        .merge(df_prev_ml_full[['data', 'previsao']], on='data', how='inner')
-        .dropna(subset=['alvo', 'previsao'])
-        .rename(columns={'previsao': 'prev_ml'})
+        .merge(df_prev[['data','previsao']], on='data', how='inner')
+        .dropna(subset=['alvo','previsao'])
+        .rename(columns={'previsao': nome})
+        .sort_values('data')
+        .reset_index(drop=True)
     )
 
-# 3) Máscaras de período
-mask_obs = df_classico_valid['alvo'].notnull()
-mask_pos = df_classico_valid['data'] > data_corte
+    return df
+
+
+# 2) Montar dataframes alinhados (somente datas em comum)
+df_classico_valid = alinhar(df_filial, df_prev_classico_full, 'prev_class')
+df_arima_valid    = alinhar(df_filial, df_prev_arima_completo, 'prev_arima')
+df_ml_valid       = alinhar(df_filial, df_prev_ml_full, 'prev_ml') if usar_ml else None
+
+
+
+
+# # 3) Máscaras de período
+# mask_obs = df_classico_valid['alvo'].notnull()
+# mask_pos = df_classico_valid['data'] > data_corte
 
 # ======================================================
 # 📐 FUNÇÃO AUXILIAR PARA MÉTRICAS
@@ -2121,6 +2119,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

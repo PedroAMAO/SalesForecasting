@@ -1526,7 +1526,7 @@ valores_min.append(df_filial['alvo'].min())
 vmin = min(valores_min)
 
 # aplica o desconto de 40%
-limite_inferior = vmin * 0.95
+limite_inferior = vmin * 0.05
 ax.set_ylim(bottom=limite_inferior)
 
 # =========================================================
@@ -1671,9 +1671,9 @@ if usar_ml:
 # ======================================================
 # 🔁 ROLLING EVALUATION — 3 MODELOS (re-treinado a cada corte)
 # ======================================================
-st.markdown("## 🔁 Avaliação Rolling — 1 passo à frente (Realista)")
+#st.markdown("## 🔁 Avaliação Rolling — 1 passo à frente (Realista)")
 
-rodar_rolling = st.button("📉 Rodar Avaliação Rolling (Realista)")
+#rodar_rolling = st.button("📉 Rodar Avaliação Rolling (Realista)")
 
 if rodar_rolling:
     st.warning("Executando rolling realista... isso pode demorar...")
@@ -2214,6 +2214,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

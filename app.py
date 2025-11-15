@@ -205,7 +205,9 @@ def prever_full_arima(modelo_classico, modelo_arima, df_filial):
     return pd.DataFrame(prevs)
 
 
-def rolling_ml(df_filial, tipo_tendencia, arima_order, lag_window=6, janela_minima=12):
+def rolling_ml(df_filial, tipo_tendencia, arima_order,
+               lag_window=6, janela_minima=12):
+
     resultados = []
     datas = df_filial['data'].unique()
 
@@ -213,53 +215,101 @@ def rolling_ml(df_filial, tipo_tendencia, arima_order, lag_window=6, janela_mini
         data_corte = datas[i]
         data_target = data_corte + pd.DateOffset(months=1)
 
+        # Se não existe realizado do mês seguinte → pula
         if data_target not in df_filial['data'].values:
             continue
 
-        # 1) clássico até o corte
+        # ============================
+        # 1) Modelo clássico até o corte
+        # ============================
         modelo_classico, df_treino, _ = treinar_modelo_classico_cached(
             df_filial, data_corte, tipo_tendencia
         )
 
-        # 2) ARIMA nos resíduos até o corte
+        # previsões clássicas SOMENTE até o corte (histórico)
+        df_prev_classico_hist = prever_full_classico(modelo_classico, df_filial[df_filial['data'] <= data_corte])
+
+        # ============================
+        # 2) Modelo ARIMA até o corte
+        # ============================
         modelo_arima = treinar_arima_ruido_cached(df_treino, arima_order)
 
-        # 3) treinar ML até o corte (idêntico ao gráfico)
-        modelo_ml_obj = treinar_modelo_ml_cached(
-            df_filial=df_filial,
-            df_prev_classico_full=prever_classico_cached(df_filial, modelo_classico),
-            df_prev_arima_completo= prever_arima_cached(modelo_classico, modelo_arima, df_filial),
-            data_corte=data_corte,
-            lag_window=lag_window
+        # previsões ARIMA SOMENTE até o corte (histórico)
+        df_prev_arima_hist = prever_full_arima(modelo_classico, modelo_arima, df_filial[df_filial['data'] <= data_corte])
+
+        # ============================
+        # 3) Montar df_base somente até o corte
+        # ============================
+        df_base = (
+            df_filial[df_filial['data'] <= data_corte][['data','alvo','t','mes_num']]
+            .merge(df_prev_classico_hist[['data','previsao']].rename(columns={'previsao':'prev_cl'}),
+                   on='data', how='left')
+            .merge(df_prev_arima_hist[['data','previsao']].rename(columns={'previsao':'prev_ar'}),
+                   on='data', how='left')
+            .sort_values("data")
+            .reset_index(drop=True)
         )
 
-        # 4) prever o mês seguinte
-        df_prev_ml_full = prever_ml_cached(
-                modelo_ml_obj,
-                df_filial,
-                df_prev_classico_full,
-                df_prev_arima_completo,
-                data_corte,
-                meses_a_frente,
-                is_share
-            )
+        # ============================
+        # 4) Construir features (lags até t)
+        # ============================
+        df_feat, feature_cols = build_lags(df_base, lag_window)
 
-        y_pred = df_prev_ml_full.loc[
-            df_prev_ml_full["data"] == data_target, "previsao"
-        ].values[0]
+        # agora df_feat contém SOMENTE HISTÓRICO até t
+        df_train = df_feat.copy()
 
-        y_real = df_filial.loc[df_filial['data'] == data_target, 'alvo'].values[0]
+        # ============================
+        # 5) Treinar ML sem vazamento
+        # ============================
+        modelo_ml = XGBRegressor(
+            n_estimators=400,
+            max_depth=4,
+            learning_rate=0.05,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            objective="reg:squarederror",
+            random_state=42
+        )
 
-        erro_abs = abs(y_real - y_pred)
+        modelo_ml.fit(df_train[feature_cols], df_train['alvo'])
+
+        # ============================
+        # 6) Previsão ML para t+1 (APENAS 1 PASSO)
+        # ============================
+        # obter prev estrutural para t+1
+        t_next  = int(df_filial.loc[df_filial['data']==data_target,'t'])
+        mes_next = int(data_target.month)
+
+        prev_cl_t = float(modelo_classico.prever_nivel_com_ic(t_next, mes_next)[0])
+
+        ruido_next = modelo_arima.modelo.forecast(steps=1).iloc[0]
+        prev_ar_t = float(np.exp(modelo_classico.prever_log(t_next, mes_next) + ruido_next) - 1.0)
+
+        # estado inicial: última linha do df_train
+        estado = df_train.iloc[-1].copy()
+
+        # previsão ML usando next_step_predict
+        estado, y_ml_next = next_step_predict(
+            estado,
+            prev_cl_t,
+            prev_ar_t,
+            modelo_ml,
+            feature_cols,
+            lag_window
+        )
+
+        y_real = df_filial.loc[df_filial['data']==data_target,'alvo'].values[0]
+
+        erro_abs = abs(y_real - y_ml_next)
         erro_pct = erro_abs / max(1e-6, y_real)
 
         resultados.append({
             "data_corte": data_corte,
-            "data_prev": data_target,
-            "real": y_real,
-            "prev": y_pred,
-            "erro_abs": erro_abs,
-            "erro_pct": erro_pct,
+            "data_prev":  data_target,
+            "real":       y_real,
+            "prev":       float(y_ml_next),
+            "erro_abs":   erro_abs,
+            "erro_pct":   erro_pct
         })
 
     return pd.DataFrame(resultados)
@@ -2119,6 +2169,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

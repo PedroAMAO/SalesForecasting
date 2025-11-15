@@ -1196,18 +1196,22 @@ df_prev_classico_ = prever_classico_cached(df_filial, modelo_classico)
 meses_a_frente = st.number_input("Meses à frente", min_value=1, max_value=24, value=6)
 
 
-# 1) Inicializa valor interno (não é widget)
+# ===============================
+# ARIMA – versão FINAL sem erro
+# ===============================
+
+# 1) Estado interno (não é widget!)
 if "ordem_arima_valor" not in st.session_state:
     st.session_state["ordem_arima_valor"] = "1,0,0"
 
-# 2) Widget com key ÚNICA (mudei aqui)
+# 2) Campo do usuário (widget)
 ordem_arima_txt = st.text_input(
     "Ordem do ARIMA (p,d,q)",
-    value=st.session_state["ordem_arima_valor"],
-    key="campo_arima_widget"      # 👈 NOVA KEY — NÃO EXISTE MAIS EM NENHUM LUGAR
+    value=st.session_state["ordem_arima_valor"],   # sempre puxa do estado interno
+    key="arima_input_fresco"                       # key única
 )
 
-# 3) Parser usando o texto do widget
+# 3) Converte o texto em p,d,q
 try:
     p, d, q = parse_arima_order(ordem_arima_txt)
 except:
@@ -1222,26 +1226,28 @@ if st.button("🚀 Otimizar ARIMA"):
             metrica='mape'
         )
 
-        nova = f"{melhor['p']},{melhor['d']},{melhor['q']}"
+        nova_ordem = f"{melhor['p']},{melhor['d']},{melhor['q']}"
 
-        # Atualiza estado interno
-        st.session_state["ordem_arima_valor"] = nova
-        # Atualiza valor do widget (sem conflito)
-        st.session_state["campo_arima_widget"] = nova
+        # Atualiza SOMENTE o estado interno (jamais o widget!)
+        st.session_state["ordem_arima_valor"] = nova_ordem
 
+        # O campo se atualiza sozinho na próxima renderização
+        st.experimental_rerun()   # força refresh limpo do campo
 
-# 5) Usa sempre o valor oficial interno
+# 5) Usa SEMPRE o valor interno (a fonte da verdade)
 p, d, q = parse_arima_order(st.session_state["ordem_arima_valor"])
 
-# 6) Agora treina o ARIMA certinho
-modelo_arima = treinar_arima_ruido_cached(df_treino, (p, d, q))
+# 6) Treina o ARIMA com p,d,q já limpos
+modelo_arima = treinar_arima_ruido_cached(
+    df_treino=df_treino,
+    ordem=(p, d, q)
+)
+
 df_prev_arima_ = prever_arima_cached(
     modelo_classico,
     modelo_arima,
     df_filial
 )
-
-
 
 
 # ---------------------------------------
@@ -2203,6 +2209,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

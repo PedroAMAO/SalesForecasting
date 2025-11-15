@@ -1197,43 +1197,28 @@ st.subheader("🔮 Previsão de Vendas Futuras")
 
 meses_a_frente = st.number_input("Meses à frente", min_value=1, max_value=24, value=6)
 
-st.markdown("### 🔍 Otimização Automática do ARIMA")
+# --- Inicializa session_state se ainda não existir
+if "ordem_arima" not in st.session_state:
+    st.session_state["ordem_arima"] = "1,0,0"
 
-# Campo manual sempre presente
-ordem_arima_txt = st.text_input("Ordem do ARIMA (p,d,q)", "1,0,0")
+# --- Campo de texto sempre usa session_state
+ordem_arima_txt = st.text_input("Ordem do ARIMA (p,d,q)", st.session_state["ordem_arima"])
 p, d, q = parse_arima_order(ordem_arima_txt)
 
-# Botão para otimizar
+# --- Botão para otimizar
 if st.button("🚀 Rodar Otimização ARIMA"):
     with st.spinner("Buscando melhores parâmetros..."):
-        melhor, resultado = otimizar_arima(
+        melhor, resultados = otimizar_arima(
             df_treino=df_treino,
             metrica='mape'
         )
 
-        p, d, q = melhor["p"], melhor["d"], melhor["q"]
+        # Atualiza session_state e o campo automaticamente
+        nova_ordem = f"{melhor['p']},{melhor['d']},{melhor['q']}"
+        st.session_state["ordem_arima"] = nova_ordem
 
-        # Atualiza o campo automaticamente
-        nova_ordem = f"{p},{d},{q}"
-        st.session_state["ordem_arima_txt"] = nova_ordem
-
-        st.success(f"Parâmetros otimizados aplicados: ({nova_ordem})")
-
-# Manter sincronizado quando o campo mudar
-if "ordem_arima_txt" in st.session_state:
-    ordem_arima_txt = st.session_state["ordem_arima_txt"]
-    p, d, q = parse_arima_order(ordem_arima_txt)
-# ---------------------------------------
-# treinar modelo ARIMA encapsulado
-# ---------------------------------------
-modelo_arima = treinar_arima_ruido_cached(df_treino, (p, d, q))
-# órico ARIMA (A) via cache — NÃO recalcular manualmente
-df_prev_arima_ = prever_arima_cached(
-    modelo_classico,
-    modelo_arima,
-    df_filial
-)
-
+        # Força o campo a ser atualizado imediatamente
+        st.experimental_rerun()
 
 # ---------------------------------------
 # Reconstrução dos resíduos (A + B + C)
@@ -2194,6 +2179,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

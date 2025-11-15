@@ -1190,49 +1190,42 @@ saz_media = modelo_classico.saz_media
 df_prev_classico_ = prever_classico_cached(df_filial, modelo_classico)
 
 # ===============================
-# ARIMA nos resíduos (ENCAPSULADO)
+# ARIMA - versão corrigida
 # ===============================
-st.markdown("---")
-st.subheader("🔮 Previsão de Vendas Futuras")
 
-meses_a_frente = st.number_input("Meses à frente", min_value=1, max_value=24, value=6)
-
-# --- Inicializa session_state se ainda não existir
+# Inicializa valor padrão
 if "ordem_arima" not in st.session_state:
     st.session_state["ordem_arima"] = "1,0,0"
 
-# --- Campo texto usa session_state sempre
-#ordem_arima_txt = st.text_input("Ordem do ARIMA (p,d,q)", st.session_state["ordem_arima"])
+# Campo texto (mostrando a ordem atual)
 ordem_arima_txt = st.text_input(
     "Ordem do ARIMA (p,d,q)",
-    key="ordem_arima"
+    value=st.session_state["ordem_arima"],
+    key="ordem_arima_input"
 )
-
-
 p, d, q = parse_arima_order(ordem_arima_txt)
 
-# --- Botão para otimizar
+# Botão otimização
 if st.button("🚀 Rodar Otimização ARIMA"):
     with st.spinner("Buscando melhores parâmetros..."):
-        melhor, resultados = otimizar_arima(
-            df_treino=df_treino,
-            metrica='mape'
-        )
+        melhor, resultados = otimizar_arima(df_treino=df_treino, metrica='mape')
 
-        # Atualiza o campo – Streamlit atualiza sozinho
-        st.session_state["ordem_arima"] = f"{melhor['p']},{melhor['d']},{melhor['q']}"
+        nova_ordem = f"{melhor['p']},{melhor['d']},{melhor['q']}"
+        st.session_state["ordem_arima"] = nova_ordem
+        st.session_state["ordem_arima_input"] = nova_ordem
 
-    # nada de st.experimental_rerun()
+# ⭐⭐ ESTA LINHA É A CORREÇÃO QUE FALTAVA ⭐⭐
+# (e ela vai DEPOIS do botão — exatamente aqui)
+p, d, q = parse_arima_order(st.session_state["ordem_arima"])
 
-# ---------------------------------------
-# treinar modelo ARIMA encapsulado
-# ---------------------------------------
+# Agora sim pode treinar o ARIMA com a ordem certa
 modelo_arima = treinar_arima_ruido_cached(df_treino, (p, d, q))
 df_prev_arima_ = prever_arima_cached(
     modelo_classico,
     modelo_arima,
     df_filial
 )
+
 
 
 # ---------------------------------------
@@ -2194,6 +2187,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

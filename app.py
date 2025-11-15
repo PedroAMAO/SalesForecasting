@@ -1202,7 +1202,13 @@ if "ordem_arima" not in st.session_state:
     st.session_state["ordem_arima"] = "1,0,0"
 
 # --- Campo texto usa session_state sempre
-ordem_arima_txt = st.text_input("Ordem do ARIMA (p,d,q)", st.session_state["ordem_arima"])
+#ordem_arima_txt = st.text_input("Ordem do ARIMA (p,d,q)", st.session_state["ordem_arima"])
+ordem_arima_txt = st.text_input(
+    "Ordem do ARIMA (p,d,q)",
+    key="ordem_arima"
+)
+
+
 p, d, q = parse_arima_order(ordem_arima_txt)
 
 # --- Botão para otimizar
@@ -1217,6 +1223,18 @@ if st.button("🚀 Rodar Otimização ARIMA"):
         st.session_state["ordem_arima"] = f"{melhor['p']},{melhor['d']},{melhor['q']}"
 
     # nada de st.experimental_rerun()
+
+# ---------------------------------------
+# treinar modelo ARIMA encapsulado
+# ---------------------------------------
+modelo_arima = treinar_arima_ruido_cached(df_treino, (p, d, q))
+df_prev_arima_ = prever_arima_cached(
+    modelo_classico,
+    modelo_arima,
+    df_filial
+)
+
+
 # ---------------------------------------
 # Reconstrução dos resíduos (A + B + C)
 # ---------------------------------------
@@ -2176,6 +2194,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

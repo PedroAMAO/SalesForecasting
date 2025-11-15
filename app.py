@@ -1134,8 +1134,8 @@ with st.spinner("Lendo e preparando os dados..."):
 # ===============================
 # Seleções
 # ===============================
-modelo_realizado = st.selectbox("🏁 Base do realizado", ['Real R$', 'Real Share %'])
-
+#modelo_realizado = st.selectbox("🏁 Base do realizado", ['Real R$', 'Real Share %'])
+modelo_realizado = 'Real R$'
 # Clip de previsões conforme o modo (R$ vs Share)
 is_share = (modelo_realizado == 'Real Share %')
 # filiais disponíveis
@@ -2214,6 +2214,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

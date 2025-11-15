@@ -1202,7 +1202,8 @@ usar_otimizacao = st.checkbox("🔍 Otimizar parâmetros do ARIMA automaticament
 
 if usar_otimizacao:
     # rodamos o rolling-origin para escolher o melhor ARIMA
-    melhor,  = otimizar_arima(
+    
+    melhor,resultado  = otimizar_arima(
         df_treino=df_treino,
         metrica='mape'
     )
@@ -2180,6 +2181,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

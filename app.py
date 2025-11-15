@@ -1193,6 +1193,7 @@ df_prev_classico_ = prever_classico_cached(df_filial, modelo_classico)
 # ARIMA - versão corrigida
 # ===============================
 
+meses_a_frente = st.number_input("Meses à frente", min_value=1, max_value=24, value=6)
 # Inicializa valor padrão
 if "ordem_arima" not in st.session_state:
     st.session_state["ordem_arima"] = "1,0,0"
@@ -2187,6 +2188,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

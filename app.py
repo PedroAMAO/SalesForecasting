@@ -1195,28 +1195,28 @@ df_prev_classico_ = prever_classico_cached(df_filial, modelo_classico)
 
 meses_a_frente = st.number_input("Meses à frente", min_value=1, max_value=24, value=6)
 
-# 1) Inicializa valor interno (não é key de widget)
+
+# 1) Inicializa valor interno (não é widget)
 if "ordem_arima_valor" not in st.session_state:
     st.session_state["ordem_arima_valor"] = "1,0,0"
 
-# 2) Widget (key SEPARADA)
+# 2) Widget com key ÚNICA (mudei aqui)
 ordem_arima_txt = st.text_input(
     "Ordem do ARIMA (p,d,q)",
     value=st.session_state["ordem_arima_valor"],
-    key="ordem_arima_input"
+    key="campo_arima_widget"      # 👈 NOVA KEY — NÃO EXISTE MAIS EM NENHUM LUGAR
 )
 
-# 3) Parser da ordem digitada (apenas do texto do widget)
+# 3) Parser usando o texto do widget
 try:
     p, d, q = parse_arima_order(ordem_arima_txt)
 except:
     st.error("Formato inválido. Use p,d,q")
     st.stop()
 
-# 4) Botão de otimizar
+# 4) Botão de otimização
 if st.button("🚀 Otimizar ARIMA"):
     with st.spinner("Buscando melhores parâmetros..."):
-
         melhor, resultados = otimizar_arima(
             df_treino=df_treino,
             metrica='mape'
@@ -1224,22 +1224,17 @@ if st.button("🚀 Otimizar ARIMA"):
 
         nova = f"{melhor['p']},{melhor['d']},{melhor['q']}"
 
-        # 👉 ATUALIZA APENAS O ESTADO INTERNO
+        # Atualiza estado interno
         st.session_state["ordem_arima_valor"] = nova
+        # Atualiza valor do widget (sem conflito)
+        st.session_state["campo_arima_widget"] = nova
 
-        # 👉 ATUALIZA O WIDGET **do jeito correto**
-        st.session_state["ordem_arima_input"] = nova
 
-
-# 5) Agora sim: usa SEMPRE o valor interno como fonte de verdade
+# 5) Usa sempre o valor oficial interno
 p, d, q = parse_arima_order(st.session_state["ordem_arima_valor"])
 
-# 6) Treinar ARIMA com a ordem final
-modelo_arima = treinar_arima_ruido_cached(
-    df_treino,
-    (p, d, q)
-)
-
+# 6) Agora treina o ARIMA certinho
+modelo_arima = treinar_arima_ruido_cached(df_treino, (p, d, q))
 df_prev_arima_ = prever_arima_cached(
     modelo_classico,
     modelo_arima,
@@ -2208,6 +2203,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

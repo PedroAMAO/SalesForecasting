@@ -20,6 +20,8 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 #from xgboost import XGBRegressor
 from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.ensemble import HistGradientBoostingRegressor
+
 
 @st.cache_data(show_spinner=False)
 def carregar_e_preparar_base(arquivo_bytes: bytes, nome_arquivo: str):
@@ -264,12 +266,13 @@ def rolling_ml(df_filial, tipo_tendencia, arima_order,
         # ============================
         
 
-        modelo_ml = GradientBoostingRegressor(
-            learning_rate=0.05,
-            max_depth=4,
-            max_iter=300,
+        modelo_ml = HistGradientBoostingRegressor(
+            learning_rate=0.1,
+            max_depth=3,
+            max_iter=200,
             random_state=42
         )
+
 
 
         modelo_ml.fit(df_train[feature_cols], df_train['alvo'])
@@ -987,16 +990,15 @@ def treinar_modelo_ml(df_filial, df_prev_classico_full, df_prev_arima_completo,
     # corta para treino
     df_train = df_feat[df_feat['data'] <= data_corte]
 
-    # treina XGB
-    modelo_ml = XGBRegressor(
-        n_estimators=400,
-        max_depth=4,
+    
+
+    modelo_ml = HistGradientBoostingRegressor(
         learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        objective="reg:squarederror",
+        max_depth=4,
+        max_iter=300,
         random_state=42
     )
+
 
     modelo_ml.fit(df_train[feature_cols], df_train['alvo'])
 
@@ -2170,6 +2172,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

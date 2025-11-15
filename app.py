@@ -1795,7 +1795,13 @@ def rolling_ml_h(df_filial, tipo_tendencia, arima_order, lag_window, max_h, jane
                 continue
 
             y_pred = df_fore.loc[df_fore['data']==data_target,'previsao'].values[0]
-            y_real = df_filial.loc[df_filial['data']==data_target,'alvo'].values[0]
+            mask_real = df_filial['data'] == data_target
+            if not mask_real.any():
+                # Não existe realizado para esse horizonte → pula
+                continue
+            
+            y_real = df_filial.loc[mask_real, 'alvo'].values[0]
+
 
             erro_pct = abs(y_real - y_pred) / max(1e-6, y_real)
 
@@ -2181,6 +2187,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

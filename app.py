@@ -108,7 +108,7 @@ def prever_arima_cached(modelo_classico, modelo_arima, df_filial):
     return prever_full_arima(modelo_classico, modelo_arima, df_filial)
 
 
-@st.cache_data(show_spinner=False)
+#@st.cache_data(show_spinner=False)
 def prever_ml_cached(modelo_ml_obj,
                      df_filial,
                      df_prev_classico_full,
@@ -1073,6 +1073,8 @@ with st.spinner("Lendo e preparando os dados..."):
 # ===============================
 modelo_realizado = st.selectbox("🏁 Base do realizado", ['Real R$', 'Real Share %'])
 
+# Clip de previsões conforme o modo (R$ vs Share)
+is_share = (modelo_realizado == 'Real Share %')
 # filiais disponíveis
 if modelo_realizado == 'Real Share %':
     filiais_disponiveis = sorted(df_com_total[df_com_total['filial'] != 'Total']['filial'].unique())
@@ -1271,10 +1273,10 @@ df_prev_classico_full = pd.concat(
     ignore_index=True
 )
 
+
 df_prev_classico_full = clip_predictions(df_prev_classico_full, is_share)
 
-# Clip de previsões conforme o modo (R$ vs Share)
-is_share = (modelo_realizado == 'Real Share %')
+
 df_prev_classico_full = clip_predictions(df_prev_classico_full, is_share)
 df_prev_arima_completo = clip_predictions(df_prev_arima_completo, is_share)
 
@@ -2087,6 +2089,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

@@ -19,36 +19,6 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Tabl
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 from xgboost import XGBRegressor
-
-
-
-
-
-# 🔒 Limita threads (evita travamentos em alguns ambientes)
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
-
-warnings.filterwarnings("ignore")
-st.set_page_config(layout="wide")
-
-# ===============================
-# UI / CSS
-# ===============================
-st.markdown("""
-    <style>
-        .main { padding: 2rem 5rem; }
-        .block-container { max-width: 100%; min-height: 90vh; }
-        html, body { font-size: 18px; }
-    </style>
-""", unsafe_allow_html=True)
-st.title("📈 Previsão com Decomposição Log + Tendência + Sazonalidade")
-
-# ===============================
-# Utils
-# ===============================
 @st.cache_data(show_spinner=False)
 def carregar_e_preparar_base(arquivo_bytes: bytes, nome_arquivo: str):
     import io
@@ -86,6 +56,36 @@ def carregar_e_preparar_base(arquivo_bytes: bytes, nome_arquivo: str):
     df_com_total["pct_filial"] = df_com_total["realizado"] / df_com_total["total_por_data"]
 
     return df_com_total
+
+
+
+
+
+# 🔒 Limita threads (evita travamentos em alguns ambientes)
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+warnings.filterwarnings("ignore")
+st.set_page_config(layout="wide")
+
+# ===============================
+# UI / CSS
+# ===============================
+st.markdown("""
+    <style>
+        .main { padding: 2rem 5rem; }
+        .block-container { max-width: 100%; min-height: 90vh; }
+        html, body { font-size: 18px; }
+    </style>
+""", unsafe_allow_html=True)
+st.title("📈 Previsão com Decomposição Log + Tendência + Sazonalidade")
+
+# ===============================
+# Utils
+# ===============================
 
 def prever_full_classico(modelo_classico, df_filial):
     """Gera previsão clássica (tend + saz + IC) somente no histórico."""

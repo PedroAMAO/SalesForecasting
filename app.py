@@ -18,7 +18,8 @@ from reportlab.lib.units import cm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
-from xgboost import XGBRegressor
+#from xgboost import XGBRegressor
+from sklearn.ensemble import GradientBoostingRegressor
 
 @st.cache_data(show_spinner=False)
 def carregar_e_preparar_base(arquivo_bytes: bytes, nome_arquivo: str):
@@ -155,7 +156,7 @@ st.title("📈 Previsão com Decomposição Log + Tendência + Sazonalidade")
 # ===============================
 
 def prever_full_classico(modelo_classico, df_filial):
-    """Gera previsão clássica (tend + saz + IC) somente no histórico."""
+    """Gera previsão clássica (tend + saz + IC) somente no órico."""
     prevs = []
     for _, row in df_filial.iterrows():
         t_i = int(row["t"])
@@ -170,13 +171,13 @@ def prever_full_classico(modelo_classico, df_filial):
     return pd.DataFrame(prevs)
 
 def prever_full_arima(modelo_classico, modelo_arima, df_filial):
-    """Reconstrói previsão ARIMA (A+B) somente no histórico observado."""
+    """Reconstrói previsão ARIMA (A+B) somente no órico observado."""
     serie_residuo = modelo_arima.modelo.fittedvalues  # só A
-    n_hist = len(df_filial)
+    n_ = len(df_filial)
 
     # Como ARIMA só tem previsões do período A, usamos apenas fitted
-    # e completamos com forecast até completar o histórico (B)
-    passos_faltando = n_hist - len(serie_residuo)
+    # e completamos com forecast até completar o órico (B)
+    passos_faltando = n_ - len(serie_residuo)
 
     if passos_faltando > 0:
         futuros_B = modelo_arima.modelo.forecast(steps=passos_faltando)
@@ -226,25 +227,25 @@ def rolling_ml(df_filial, tipo_tendencia, arima_order,
             df_filial, data_corte, tipo_tendencia
         )
 
-        # previsões clássicas SOMENTE até o corte (histórico)
-        df_prev_classico_hist = prever_full_classico(modelo_classico, df_filial[df_filial['data'] <= data_corte])
+        # previsões clássicas SOMENTE até o corte (órico)
+        df_prev_classico_ = prever_full_classico(modelo_classico, df_filial[df_filial['data'] <= data_corte])
 
         # ============================
         # 2) Modelo ARIMA até o corte
         # ============================
         modelo_arima = treinar_arima_ruido_cached(df_treino, arima_order)
 
-        # previsões ARIMA SOMENTE até o corte (histórico)
-        df_prev_arima_hist = prever_full_arima(modelo_classico, modelo_arima, df_filial[df_filial['data'] <= data_corte])
+        # previsões ARIMA SOMENTE até o corte (órico)
+        df_prev_arima_ = prever_full_arima(modelo_classico, modelo_arima, df_filial[df_filial['data'] <= data_corte])
 
         # ============================
         # 3) Montar df_base somente até o corte
         # ============================
         df_base = (
             df_filial[df_filial['data'] <= data_corte][['data','alvo','t','mes_num']]
-            .merge(df_prev_classico_hist[['data','previsao']].rename(columns={'previsao':'prev_cl'}),
+            .merge(df_prev_classico_[['data','previsao']].rename(columns={'previsao':'prev_cl'}),
                    on='data', how='left')
-            .merge(df_prev_arima_hist[['data','previsao']].rename(columns={'previsao':'prev_ar'}),
+            .merge(df_prev_arima_[['data','previsao']].rename(columns={'previsao':'prev_ar'}),
                    on='data', how='left')
             .sort_values("data")
             .reset_index(drop=True)
@@ -255,21 +256,21 @@ def rolling_ml(df_filial, tipo_tendencia, arima_order,
         # ============================
         df_feat, feature_cols = build_lags(df_base, lag_window)
 
-        # agora df_feat contém SOMENTE HISTÓRICO até t
+        # agora df_feat contém SOMENTE ÓRICO até t
         df_train = df_feat.copy()
 
         # ============================
         # 5) Treinar ML sem vazamento
         # ============================
-        modelo_ml = XGBRegressor(
-            n_estimators=400,
-            max_depth=4,
+        
+
+        modelo_ml = GradientBoostingRegressor(
             learning_rate=0.05,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            objective="reg:squarederror",
+            max_depth=4,
+            max_iter=300,
             random_state=42
         )
+
 
         modelo_ml.fit(df_train[feature_cols], df_train['alvo'])
 
@@ -841,7 +842,7 @@ def otimizar_arima(df_treino,
 
 
 # ============================================================
-#  FUNÇÃO 1 — Build Lags (histórico até o corte)
+#  FUNÇÃO 1 — Build Lags (órico até o corte)
 # ============================================================
 
 def build_lags(df_base, lag_window=6):
@@ -850,7 +851,7 @@ def build_lags(df_base, lag_window=6):
         data, alvo, prev_cl, prev_ar, t, mes_num
     lag_window: Nº de lags (N)
     Retorna:
-        df_feat  -> base com todas as features históricas
+        df_feat  -> base com todas as features óricas
         feature_cols -> lista das features para treinar o modelo ML
     """
 
@@ -999,8 +1000,8 @@ def treinar_modelo_ml(df_filial, df_prev_classico_full, df_prev_arima_completo,
 
     modelo_ml.fit(df_train[feature_cols], df_train['alvo'])
 
-    # ⚠️ PREVISÕES HISTÓRICAS DO ML — ESSENCIAL PARA NÃO QUEBRAR NO PREVER!
-    df_feat["prev_ml_hist"] = modelo_ml.predict(df_feat[feature_cols])
+    # ⚠️ PREVISÕES ÓRICAS DO ML — ESSENCIAL PARA NÃO QUEBRAR NO PREVER!
+    df_feat["prev_ml_"] = modelo_ml.predict(df_feat[feature_cols])
 
     # monta objeto
     return {
@@ -1020,17 +1021,17 @@ def prever_ml(modelo_ml_obj, df_filial, df_prev_classico_full, df_prev_arima_com
     lag_window = modelo_ml_obj["lag_window"]
     df_feat = modelo_ml_obj["df_feat"]
 
-    # Histórico até corte
+    # órico até corte
     df_train = df_feat[df_feat['data'] <= data_corte]
     if df_train.empty:
-        raise ValueError("Não há base histórica suficiente para ML até a data de corte!")
+        raise ValueError("Não há base órica suficiente para ML até a data de corte!")
 
     estado = df_train.iloc[-1].copy()
 
-    # Descobre quantos steps são necessários (histórico + futuro)
-    ult_data_hist = df_filial['data'].max()
-    gap_meses = max(0, (ult_data_hist.year - data_corte.year)*12 +
-                       (ult_data_hist.month - data_corte.month))
+    # Descobre quantos steps são necessários (órico + futuro)
+    ult_data_ = df_filial['data'].max()
+    gap_meses = max(0, (ult_data_.year - data_corte.year)*12 +
+                       (ult_data_.month - data_corte.month))
     total_steps = gap_meses + meses_a_frente
 
     futuros = []
@@ -1065,17 +1066,17 @@ def prever_ml(modelo_ml_obj, df_filial, df_prev_classico_full, df_prev_arima_com
             "previsao": float(y_ml_t)
         })
 
-    # Histórico já previsto pelo ML
-    df_prev_ml_hist = (
-        df_feat[df_feat['data'] <= data_corte][["data", "prev_ml_hist"]]
-        .rename(columns={"prev_ml_hist": "previsao"})
+    # órico já previsto pelo ML
+    df_prev_ml_ = (
+        df_feat[df_feat['data'] <= data_corte][["data", "prev_ml_"]]
+        .rename(columns={"prev_ml_": "previsao"})
         .dropna(subset=["previsao"])
     )
 
     df_prev_ml_fut = pd.DataFrame(futuros)
 
-    # Junta hist + futuro
-    df_prev_ml_full = pd.concat([df_prev_ml_hist, df_prev_ml_fut], ignore_index=True)
+    # Junta  + futuro
+    df_prev_ml_full = pd.concat([df_prev_ml_, df_prev_ml_fut], ignore_index=True)
 
     # Ordena e limpa
     df_prev_ml_full = (
@@ -1175,8 +1176,8 @@ modelo_classico, df_treino, df_real = treinar_modelo_classico_cached(
 sigma_ruido = modelo_classico.sigma_ruido
 saz_media = modelo_classico.saz_media
 
-# Previsão clássica (sem ARIMA) para todo histórico
-df_prev_classico_hist = prever_classico_cached(df_filial, modelo_classico)
+# Previsão clássica (sem ARIMA) para todo órico
+df_prev_classico_ = prever_classico_cached(df_filial, modelo_classico)
 
 
 # ===============================
@@ -1191,7 +1192,7 @@ usar_otimizacao = st.checkbox("🔍 Otimizar parâmetros do ARIMA automaticament
 
 if usar_otimizacao:
     # rodamos o rolling-origin para escolher o melhor ARIMA
-    melhor, hist = otimizar_arima(
+    melhor,  = otimizar_arima(
         df_treino=df_treino,
         metrica='mape'
     )
@@ -1208,8 +1209,8 @@ else:
 # treinar modelo ARIMA encapsulado
 # ---------------------------------------
 modelo_arima = treinar_arima_ruido_cached(df_treino, (p, d, q))
-# Histórico ARIMA (A) via cache — NÃO recalcular manualmente
-df_prev_arima_hist = prever_arima_cached(
+# órico ARIMA (A) via cache — NÃO recalcular manualmente
+df_prev_arima_ = prever_arima_cached(
     modelo_classico,
     modelo_arima,
     df_filial
@@ -1301,7 +1302,7 @@ df_prev_arima_completo = pd.DataFrame(prevs_arima_full)
 # )
 
 
-# Junta clássico (histórico) + futuro clássico sem ARIMA
+# Junta clássico (órico) + futuro clássico sem ARIMA
 # (futuro clássico reaproveita sigma_ruido e tendência+sazonal)
 ult_data = df_filial['data'].max()
 datas_fut = pd.date_range(start=ult_data + pd.DateOffset(months=1), periods=meses_a_frente, freq='MS')
@@ -1321,7 +1322,7 @@ for i, dta in enumerate(datas_fut):
 df_prev_futuro_classico = pd.DataFrame(fut)
 
 df_prev_classico_full = pd.concat(
-    [df_prev_classico_hist, df_prev_futuro_classico],
+    [df_prev_classico_, df_prev_futuro_classico],
     ignore_index=True
 )
 
@@ -1334,7 +1335,7 @@ df_prev_arima_completo = clip_predictions(df_prev_arima_completo, is_share)
 # 🔶 APLICAÇÃO MACHINE LEARNING
 # ============================================================
 # ============================================================
-# 🔶 PIPELINE ML COMPLETO (treino + histórico + forecast futuro)
+# 🔶 PIPELINE ML COMPLETO (treino + órico + forecast futuro)
 # ============================================================
 
 # Ativa o modelo ML se o usuário quiser
@@ -1353,7 +1354,7 @@ if usar_ml:
         lag_window=lag_window
     )
 
-    # 2) Faz toda previsao (histórico + futuro)
+    # 2) Faz toda previsao (órico + futuro)
     df_prev_ml_full = prever_ml_cached(
             modelo_ml_obj,
             df_filial,
@@ -1480,7 +1481,7 @@ valores_min.append(df_prev_arima_completo['previsao'].min())
 if usar_ml:
     valores_min.append(df_prev_ml_full['previsao'].min())
 
-# histórico (alvo real)
+# órico (alvo real)
 valores_min.append(df_filial['alvo'].min())
 
 # menor valor geral
@@ -1754,7 +1755,7 @@ def rolling_ml_h(df_filial, tipo_tendencia, arima_order, lag_window, max_h, jane
         # (2) arima até corte
         modelo_arima = treinar_arima_ruido_cached(df_treino, arima_order)
 
-        # (3) previsões histórico completo
+        # (3) previsões órico completo
         df_cl = prever_classico_cached(df_filial, modelo_classico)
         df_ar =  prever_arima_cached(modelo_classico, modelo_arima, df_filial)
 
@@ -2011,7 +2012,7 @@ if st.button("🧠 Gerar Interpretação com LLM"):
             rolling_text = ""
             rolling_explicacao = """
 A Avaliação Rolling simula como cada modelo teria performado caso estivéssemos,
-historicamente, em “tempo real”. Ou seja: em cada mês t, o modelo é treinado
+oricamente, em “tempo real”. Ou seja: em cada mês t, o modelo é treinado
 usando apenas os dados disponíveis até t, e faz uma previsão para t+1.
 
 Esse procedimento evita absolutamente qualquer vazamento e mede:

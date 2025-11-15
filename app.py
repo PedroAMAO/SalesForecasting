@@ -1171,7 +1171,7 @@ default_corte = datas[-4] if len(datas) >= 4 else datas[-1]
 data_corte = st.select_slider("📅 Data de corte para previsão", options=datas, value=default_corte)
 
 #tipo_tendencia = st.selectbox("📈 Tipo de Tendência", [ "Linear", "Quadrática","Média"])
-tipo_tendencia = 'Linear"
+tipo_tendencia = 'Linear'
 
 # ===============================
 # Tendência + sazonalidade (ENCAPSULADO)
@@ -2214,6 +2214,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

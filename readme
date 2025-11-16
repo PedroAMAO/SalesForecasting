@@ -1,346 +1,143 @@
-📈 Forecaster Híbrido — Tendência + Sazonalidade + ARIMA + ML
+📈 Forecaster Híbrido — Tendência + Sazonalidade + ARIMA + ML + LLM
 
-Este projeto é uma aplicação em Streamlit para previsão de vendas (ou séries temporais similares) usando uma arquitetura híbrida:
+Este projeto implementa um Forecaster Híbrido para séries temporais, desenvolvido em Streamlit, combinando técnicas clássicas, estatísticas e de machine learning — com geração automática de relatórios via LLM (OpenAI).
 
-Modelo Clássico (Tendência + Sazonalidade Média em log),
+A arquitetura foi construída para oferecer rigor técnico com facilidade operacional, permitindo ao usuário realizar previsões realistas, avaliar modelos por Rolling-Origin, analisar importância de features e gerar relatórios em PDF com qualidade profissional.
 
-ARIMA aplicado ao ruído da decomposição,
+🚀 Principais Componentes do Modelo
+1) Modelo Clássico (Tendência + Sazonalidade Média em log)
 
-Meta-modelo de Machine Learning (Random Forest) em cima de lags, erros e deltas,
+Série transformada em log: log(y + 1)
 
-Seleção automática do melhor modelo via Rolling Evaluation por horizonte (H-passo),
+Tendência: Linear, Quadrática ou Média
 
-Construção de Intervalo de Confiança Dinâmico por horizonte,
+Sazonalidade: média mensal dos resíduos
 
-Interpretação automática via LLM (OpenAI),
 
-Geração de Relatório Profissional em PDF com gráfico, métricas, tabela de previsão e análise técnica.
+2) ARIMA aplicado aos resíduos
 
-Tudo isso com uma interface simples, clicável e (quase) à prova de susto.
+ARIMA(p, d, q) ajustado somente no ruído da decomposição clássica
+otimizada automaticamente via Rolling-Origin 1-passo
 
-🚀 Principais Funcionalidades
-🔹 1. Upload da Base
+Reconstrução final:
+previsão = tendência + sazonalidade + ruído_ARIMA
 
-O app lê um arquivo Excel (.xlsx) com as colunas:
+3) Meta-Modelo de Machine Learning (Random Forest)
 
-ano
+Ativado opcionalmente:
 
-mês ou mes
-
-Filial
-
-Realizado
-
-Ele é tolerante com:
-
-Variações de maiúsculas/minúsculas,
-
-Colunas com nomes próximos (ex.: “Ano Base”, “Filial XYZ”, “Realizado R$”).
-
-A leitura é feita via:
-
-safe_sheet_read → tenta usar a aba Planilha1, se não existir, pega a primeira,
-
-normalize_columns → padroniza nomes, ajusta mês/mes, identifica Filial e Realizado.
-
-🔹 2. Pré-processamento Automático
-
-Após o upload, o pipeline:
-
-Converte ano + mes em uma data mensal (YYYY-MM-01),
-
-Cria uma linha agregada de Total (somatório das filiais),
-
-Calcula a participação da filial (pct_filial) em relação ao total do mês,
-
-Ordena a série temporal,
-
-Cria:
-
-t → índice temporal (0, 1, 2, ...),
-
-mes_num → número do mês (1–12),
-
-Define a coluna alvo (normalmente Real R$).
-
-Obs.: O app já está preparado para trabalhar com share (%), mas no código atual o modo ativo é Real R$.
-
-🔹 3. Modelos de Previsão
-📌 Modelo Clássico (Tendência + Sazonalidade Média)
-
-Implementado na classe ClassicalTrendSeasonalModel, ele trabalha em log:
-
-Log da série: log(alvo + 1),
-
-Tendência:
-
-Linear (padrão),
-
-Quadrática ou Média (já suportadas na arquitetura),
-
-Sazonalidade:
-
-Média mensal dos resíduos (um fator por mês),
-
-Ruído:
-
-ruido = residuo - sazonalidade,
-
-Estimativa do desvio padrão sigma_ruido em log.
-
-Para cada ponto, o modelo retorna:
-
-Previsão no nível,
-
-ic_inf e ic_sup usando 2,57·σ em log (≈99%),
-
-yhat_log.
-
-📌 ARIMA sobre o Ruído
-
-O ARIMA é ajustado nos resíduos do modelo clássico:
-
-treinar_arima_ruido(df_treino, order) ajusta um ARIMA em ruido,
-
-Ordem (p, d, q) pode ser:
-
-Definida inicialmente como "0,0,0",
-
-Otimizada automaticamente via otimizar_arima com Rolling-Origin:
-
-Para cada combinação de (p, d, q),
-
-Faz forecast one-step ahead do ruído,
-
-Calcula erro médio (MAPE-like ou RMSE),
-
-Escolhe o melhor conjunto.
-
-O app então:
-
-Reconstrói o ruído em três blocos:
-
-A: resíduos fitted,
-
-B: forecast até o fim do histórico,
-
-C: forecast para meses futuros,
-
-Soma tendência + sazonalidade + ruído em log,
-
-Volta para o nível: exp(yhat_log) - 1.
-
-📌 Meta-Modelo de Machine Learning (Random Forest)
-
-Quando o usuário marca “🤖 Ativar previsão com Machine Learning (ML)”, entra o meta-modelo:
-
-Algoritmo: RandomForestRegressor com:
-
-n_estimators = 500
-
-max_depth = None
+500 árvores
 
 max_features = "sqrt"
 
-n_jobs = -1
+lags, erros defasados, deltas e sazonalidade circular como features
 
-random_state = 42
+Forecast futurístico recursivo com atualização de lags
 
-Features geradas em build_lags:
+4) Seleção Automática do Melhor Modelo
 
-Lags de:
+Via Rolling Evaluation H-passo, comparando:
 
-alvo → lag_y_k,
+ARIMA
 
-previsão Clássica → lag_cl_k,
+ML
 
-previsão ARIMA → lag_ar_k,
+O “campeão” é escolhido pela média do erro por horizonte.
 
-Erros defasados:
+5) Intervalo de Confiança Dinâmico
 
-err_cl_k = lag_y_k - lag_cl_k,
+Para cada horizonte h, calcula:
 
-err_ar_k = lag_y_k - lag_ar_k,
-
-Deltas entre lags:
-
-delta_y_k, delta_cl_k, delta_ar_k,
-
-delta_err_cl_k, delta_err_ar_k,
-
-Features contemporâneas:
-
-feat_prev_cl_t, feat_prev_ar_t,
-
-feat_t (tempo),
-
-feat_mes_sin, feat_mes_cos (sazonalidade circular).
-
-O treino é sempre cortado em data_corte para evitar vazamento.
-
-O forecast futuro é feito via next_step_predict, atualizando recursivamente:
-
-Lags de Y,
-
-Lags de Clássico/ARIMA,
-
-Erros e deltas,
-
-Tempo e mês.
-
-🎨 Visualizações
-
-O app gera um Gráfico Master com:
-
-Realizado → barras cinza,
-
-Clássico → linha preta pontilhada,
-
-ARIMA (Resíduos) → linha azul,
-
-ML Meta-Model (se ativo) → linha roxa,
-
-Linha de corte → vertical vermelha,
-
-Ajuste automático do eixo Y com “respiro” abaixo do mínimo.
-
-📘 Métricas
-
-As métricas são calculadas para:
-
-Período Completo:
-
-MAPE (%)
-
-R²
-
-RMSE
-
-Pós-corte (apenas datas > data_corte):
-
-Mesmas métricas, para focar na parte que “vale” como previsão.
-
-Função central: metricas(df, col_pred, data_corte).
-
-🔁 Rolling Evaluation & Melhor Modelo
-
-O app implementa duas camadas de Rolling:
-
-Rolling 1-passo por corte (desligado por padrão no botão):
-
-Re-treinando Clássico / ARIMA / ML a cada corte,
-
-Calculando erro realista (sem olhar o futuro).
-
-Rolling por horizonte (H-passo) para escolha do melhor modelo:
-
-rolling_arima_h e rolling_ml_h rodam os modelos para horizontes h = 1..H,
-
-Calculam erro_pct por horizonte,
-
-Função resumo_horizonte condensa:
-
-média do erro,
+média do erro real (rolling),
 
 desvio padrão,
 
-banda e_bound(h) = mean + z·std (z = 1,64).
+banda: mean + 1.64·std
 
-O botão “🏆 Usar Melhor Modelo (Rolling + IC Dinâmico)”:
+IC final:
 
-Compara os modelos (ARIMA e ML) pelo erro médio,
+IC_inf = yhat · (1 − e_bound)
+IC_sup = yhat · (1 + e_bound)
 
-Seleciona o campeão,
+6) Relatório Técnico via LLM (OpenAI)
 
-Gera um intervalo de confiança dinâmico por horizonte via aplicar_ic_h,
+Prompt estruturado (metodologia, ARIMA, ML, Rolling, IC dinâmico)
 
-Monta uma tabela de previsões futuras (tabela_previsoes) com:
+Envio do gráfico (base64)
 
-Data,
+Estilo acadêmico-aplicado
 
-Horizonte h,
+Integra PDF de contexto (opcional)
 
-Previsão,
+7) PDF Profissional
 
-IC inferior e superior.
+Com:
 
-🧬 Importância das Features (Curva ABC)
+Gráfico do melhor modelo
 
-Quando o ML está ativo, o app:
+Gráfico de importância das features
 
-Calcula feature_importances_ da Random Forest,
+Tabela de métricas
 
-Traduza os nomes técnicos via traduz_feature (lags, deltas, erros, sazonalidade),
+Forecast futuro com IC dinâmico
 
-Monta uma Curva ABC:
+Relatório técnico do LLM
 
-Percentual de importância acumulado,
+🧰 Tecnologias
 
-Classificação em A/B/C,
+Python
 
-Exibe as top features e suas contribuições.
+Streamlit
 
-Também gera um gráfico horizontal com as Top 15 features e guarda a imagem para uso no PDF.
+Statsmodels (ARIMA)
 
-🧠 Relatório Técnico via LLM (OpenAI)
+Scikit-learn (Random Forest)
 
-Depois de:
+ReportLab (PDF)
 
-Escolher o melhor modelo,
+PyMuPDF (PDF → texto)
 
-Gerar o gráfico campeão com IC,
+OpenAI gpt-4o (interpretação técnica)
 
-Construir a tabela de previsões,
+Pandas / NumPy / Matplotlib
 
-o app libera a seção:
+📦 Estrutura do Projeto
+.
+├── app.py                 # Aplicação Streamlit
+├── requirements.txt       # Dependências
+├── readme.md              # Documentação
+└── .devcontainer/         # Ambiente de desenvolvimento (VSCode)
 
-📘 Relatório Técnico — Interpretação Acadêmico-Aplicada
+▶️ Como Rodar
 
-Recursos:
+Instale dependências:
 
-Upload opcional de PDF de contexto organizacional (lido via PyMuPDF),
+pip install -r requirements.txt
 
-Geração de um prompt grande com:
 
-Metodologia,
+Configure sua chave OpenAI em:
 
-Parâmetros ARIMA,
+.streamlit/secrets.toml
 
-Métricas dos modelos,
 
-Estrutura do IC dinâmico,
+Execute:
 
-Importância das features do ML (se houver),
+streamlit run app.py
 
-Envio da imagem do gráfico (base64) + texto para a OpenAI,
+🎓 Para Que Serve Este Projeto?
 
-Uso do modelo gpt-4o para gerar um relatório técnico estruturado.
+Ideal para:
 
-O texto é exibido no Streamlit e salvo em st.session_state["relatorio_tecnico"].
+estudos de séries temporais,
 
-💡 A chave da OpenAI é lida de st.secrets["openai_api_key"].
+demonstração de técnicas híbridas,
 
-📄 Geração de PDF
+aplicações empresariais,
 
-Com o relatório pronto, o app permite:
+ensino de Forecasting Multicamadas (Trend + Season + ARIMA + ML),
 
-Gerar um PDF completo via reportlab, contendo:
+construção de relatórios automáticos.
 
-Título com nome da filial,
+🧑‍💻 Autor
 
-Gráfico do melhor modelo,
-
-Gráfico de importância de features (se existir),
-
-Tabela de métricas,
-
-Tabela com previsões futuras (data, horizonte, previsão, IC),
-
-Relatório técnico formatado.
-
-Função central: gerar_pdf_completo(...).
-O download é feito via st.download_button.
-reportlab
-pymupdf
-openai
-python-dateutil
+Projeto desenvolvido por Pedro Augusto Matelli Antunes de Oliveira

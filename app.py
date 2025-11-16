@@ -1378,7 +1378,7 @@ df_prev_arima_completo = clip_predictions(df_prev_arima_completo, is_share)
 
 # Ativa o modelo ML se o usuário quiser
 usar_ml = st.checkbox("🤖 Ativar previsão com Machine Learning (ML)", value=False)
-
+lag_window = None
 if usar_ml:
     st.subheader("🔮 Previsão via Modelo ML (Meta-Model)")
     lag_window = st.slider("Janela de lags (N)", min_value=3, max_value=12, value=6)
@@ -2308,6 +2308,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

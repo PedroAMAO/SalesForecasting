@@ -2163,7 +2163,6 @@ if usar_best_model:
 # ===============================
 # 🧩 Relatório Técnico (LLM)
 # ===============================
-
 if usar_best_model:
 
     st.markdown("---")
@@ -2195,62 +2194,90 @@ if usar_best_model:
                 # ====== preparar imagem ======
                 img_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
+                # ====== puxar importância das features (se houver) ======
+                feat_block = ""
+                if usar_ml and "importancia_features" in st.session_state:
+                    df_imp = st.session_state["importancia_features"].copy()
+                    top_feats = df_imp.head(10)[["feature_friendly", "import_pct"]]
+
+                    txt_top = "\n".join(
+                        [f"- {row['feature_friendly']}: {row['import_pct']*100:.1f}%"
+                         for _, row in top_feats.iterrows()]
+                    )
+
+                    feat_block = f"""
+### 5.1 Interpretação das Features do Meta-Modelo (Random Forest)
+
+As features com maior importância acumulada (>80% pela Curva ABC) foram:
+
+{txt_top}
+
+Explique o significado técnico dessas variáveis:
+• lags e sua relação com inércia temporal;  
+• deltas e detecção de mudanças;  
+• erros defasados e captura de tendência/resíduo;  
+• atributos sazonais (sin/cos);  
+• previsão clássica/ARIMA como meta-entradas.  
+"""
+
                 # ====== gerar prompt técnico ======
                 prompt = f"""
 Produza um RELATÓRIO TÉCNICO, com tom acadêmico e aplicado, sobre a previsão de vendas
 da filial "{filial}". O relatório deve ter clareza, rigor e estrutura similar a um artigo técnico.
 
 ## 1. Introdução Metodológica
-Explique de forma didática, porém rigorosa:
-• decomposição logarítmica da série;
-• modelagem de tendência (Linear, Quadrática ou Média);
+Explique detalhadamente:
+• decomposição logarítmica;
+• tendência (Linear, Quadrática ou Média);
 • sazonalidade média mensal;
-• modelagem dos resíduos por ARIMA (({p},{d},{q}));
 • reconstrução do nível;
-• lógica do forecast futurístico;
-• avaliação Rolling-Origin;
-• lógica do Meta-Model (ML), se ativo.
+• modelagem do ruído via ARIMA({p},{d},{q});
+• forecast do nível + ruído;
+• avaliação Rolling-Origin (evita vazamento);
+• meta-modelo ML (se ativo) como modelo híbrido.
 
 ## 2. Metodologia Aplicada ao Caso
-Explique como o dataset foi processado:
+Explique o passo a passo utilizado neste dataset:
 • data de corte: {data_corte.date()};
 • horizonte de previsão: {meses_a_frente} meses;
-• se ML estava ativo: {usar_ml};
-• como o melhor modelo foi selecionado via Rolling.
+• ML ativo: {usar_ml};
+• seleção do melhor modelo via Rolling;
+• construção do IC dinâmico.
 
 ## 3. Resultados Empíricos
-Analise o comportamento do gráfico enviado:
+Analise o gráfico enviado (nível + IC):
 • padrão da série;
 • aderência da tendência;
-• comportamento do ruído;
-• aderência pós-corte;
-• qualidade do IC dinâmico;
-• como o modelo reage a mudanças de regime.
+• comportamento dos resíduos;
+• estabilidade da previsão pós-corte;
+• comportamento do intervalo de confiança.
 
 ## 4. Desempenho Quantitativo
-Utilize as métricas:
+Utilize as métricas observadas:
 
 Clássico → MAPE={m_class_total['MAPE (%)']:.2f}%, R²={m_class_total['R²']:.3f}
 ARIMA    → MAPE={m_arima_total['MAPE (%)']:.2f}%, R²={m_arima_total['R²']:.3f}
 {"ML       → MAPE="+str(round(m_ml_total['MAPE (%)'],2))+"%, R²="+str(round(m_ml_total['R²'],3)) if usar_ml else ""}
 
-Inclua comentários técnicos sobre o que estas métricas revelam.
+Discuta o que cada métrica indica e compare os métodos.
 
 ## 5. Discussão dos Resultados
 Aborde:
-• se o modelo captura bem o padrão da filial; 
-• se há sinais de ruptura estrutural;
-• influência de sazonalidades atípicas;
-• estabilidade temporal observada no Rolling.
+• capacidade do modelo em capturar ciclos e rupturas; 
+• sensibilidade a mudanças regime;
+• desempenho rolling;
+• robustez temporal.
 
-## 6. Integração com o contexto (se houver)
+{feat_block}
+
+## 6. Integração com o Contexto 
 {context_text if context_text else "Nenhum contexto adicional fornecido."}
 
 ## 7. Conclusão
 De forma objetiva:
 • qual modelo é mais adequado e por quê;
 • limitações atuais;
-• recomendações futuras (ex.: dinâmica de sazonalidade, modelos híbridos, variáveis externas).
+• recomendações de futuro (ML mais profundo, variáveis externas, sazonalidade dinâmica, redes neurais).
 
 Produza texto claro, técnico, estruturado e com tom profissional.
                 """
@@ -2310,6 +2337,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

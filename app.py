@@ -245,6 +245,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 st.title("📈 Previsão Híbrida de Vendas com Análise Automática por LLM")
 
+#https://youtu.be/XMxxrU5LQAA
+with st.expander("📺 Ver explicação em vídeo"):
+    st.video("https://youtu.be/XMxxrU5LQAA")
+
 # ===============================
 # Utils
 # ===============================
@@ -2546,6 +2550,7 @@ if 'relatorio_tecnico' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

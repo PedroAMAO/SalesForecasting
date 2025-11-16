@@ -517,13 +517,18 @@ def gerar_pdf_completo(
     filial,
     m_class_total, m_arima_total, m_ml_total,
     m_class_pos, m_arima_pos, m_ml_pos,
-    relatorio_llm,
-    grafico_png
+    relatorio_texto,
+    img_best_model,
+    img_features
 ):
+
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4,
-                            rightMargin=2*cm, leftMargin=2*cm,
-                            topMargin=2*cm, bottomMargin=2*cm)
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=2*cm, leftMargin=2*cm,
+        topMargin=2*cm, bottomMargin=2*cm
+    )
 
     styles = getSampleStyleSheet()
     story = []
@@ -531,50 +536,93 @@ def gerar_pdf_completo(
     # =============================
     # TÍTULO
     # =============================
-    story.append(Paragraph(f"<b>Relatório de Previsão — Filial {filial}</b>", styles["Title"]))
-    story.append(Spacer(1, 0.4*cm))
-
-    # =============================
-    # IMAGEM DO GRÁFICO
-    # =============================
-    img_buf = io.BytesIO(grafico_png)
-    story.append(Image(img_buf, width=16*cm, height=7*cm))
+    story.append(Paragraph(
+        f"<b>Relatório de Previsão — Filial {filial}</b>",
+        styles["Title"]
+    ))
     story.append(Spacer(1, 0.6*cm))
 
     # =============================
-    # MÉTRICAS (Tabela)
+    # FIGURA 1 — MELHOR MODELO
     # =============================
-    dados_tabela = [
+    if img_best_model:
+        story.append(Paragraph(
+            "<b>Figura 1 — Previsão Final com Intervalo de Confiança</b>",
+            styles["Heading3"]
+        ))
+        story.append(Spacer(1, 0.2*cm))
+
+        story.append(Image(io.BytesIO(img_best_model), width=16*cm))
+        story.append(Spacer(1, 0.6*cm))
+
+    # =============================
+    # FIGURA 2 — FEATURES IMPORTANTES
+    # =============================
+    if img_features:
+        story.append(Paragraph(
+            "<b>Figura 2 — Importância das Features (Curva ABC)</b>",
+            styles["Heading3"]
+        ))
+        story.append(Spacer(1, 0.2*cm))
+
+        story.append(Image(io.BytesIO(img_features), width=16*cm))
+        story.append(Spacer(1, 0.8*cm))
+
+    # =============================
+    # TABELA DE MÉTRICAS
+    # =============================
+    story.append(Paragraph("<b>Métricas Gerais</b>", styles["Heading2"]))
+    story.append(Spacer(1, 0.2*cm))
+
+    dados = [
         ["Modelo", "MAPE (%)", "R²", "RMSE"],
-        ["Clássico", f"{m_class_total['MAPE (%)']:.2f}", f"{m_class_total['R²']:.3f}", f"{m_class_total['RMSE']:.2f}"],
-        ["ARIMA",   f"{m_arima_total['MAPE (%)']:.2f}", f"{m_arima_total['R²']:.3f}", f"{m_arima_total['RMSE']:.2f}"],
+        ["Clássico",
+         f"{m_class_total['MAPE (%)']:.2f}",
+         f"{m_class_total['R²']:.3f}",
+         f"{m_class_total['RMSE']:.2f}"],
+        ["ARIMA",
+         f"{m_arima_total['MAPE (%)']:.2f}",
+         f"{m_arima_total['R²']:.3f}",
+         f"{m_arima_total['RMSE']:.2f}"]
     ]
 
     if m_ml_total:
-        dados_tabela.append(
-            ["ML", f"{m_ml_total['MAPE (%)']:.2f}", f"{m_ml_total['R²']:.3f}", f"{m_ml_total['RMSE']:.2f}"]
-        )
+        dados.append([
+            "ML",
+            f"{m_ml_total['MAPE (%)']:.2f}",
+            f"{m_ml_total['R²']:.3f}",
+            f"{m_ml_total['RMSE']:.2f}"
+        ])
 
-    tabela = Table(dados_tabela)
+    tabela = Table(dados)
     tabela.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.black),
+        ('GRID', (0,0), (-1,-1), 0.4, colors.black),
+        ('ALIGN', (1,1), (-1,-1), 'CENTER'),
         ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
-        ('ALIGN', (1,1), (-1,-1), 'CENTER')
+        ('FONTSIZE', (0,0), (-1,-1), 9),
     ]))
+
     story.append(tabela)
-    story.append(Spacer(1, 0.8*cm))
+    story.append(Spacer(1, 1*cm))
 
     # =============================
-    # RELATÓRIO DA LLM
+    # INTERPRETAÇÃO LLM
     # =============================
-    story.append(Paragraph("<b>Interpretação Automática (LLM)</b>", styles["Heading2"]))
-    for par in relatorio_llm.split("\n"):
+    story.append(Paragraph("<b>Interpretação Técnica (LLM)</b>", styles["Heading2"]))
+    story.append(Spacer(1, 0.2*cm))
+
+    for par in relatorio_texto.split("\n"):
         if par.strip():
             story.append(Paragraph(par.strip(), styles["BodyText"]))
             story.append(Spacer(1, 0.25*cm))
 
+    # =============================
+    # FINALIZAÇÃO
+    # =============================
     doc.build(story)
+
     pdf_value = buffer.getvalue()
     buffer.close()
     return pdf_value
@@ -1901,6 +1949,13 @@ if usar_ml:
 
         st.pyplot(fig_imp)
 
+        buf_feat = io.BytesIO()
+        fig_imp.savefig(buf_feat, format="png", dpi=200, bbox_inches="tight")
+        buf_feat.seek(0)
+        st.session_state["features_image"] = buf_feat.getvalue()
+
+
+    
     except Exception as e:
         st.warning(f"Não foi possível calcular importâncias de features: {e}")
 
@@ -2383,7 +2438,7 @@ Produza texto claro, técnico, estruturado e com tom profissional.
 # ===============================
 # 📄 PDF FINAL (sempre aparece depois de já existir relatório)
 # ===============================
-if 'relatorio_llm' in st.session_state:
+if 'relatorio_tecnico' in st.session_state:
     st.markdown("---")
     st.subheader("📄 Gerar PDF do Relatório Completo")
 
@@ -2405,6 +2460,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

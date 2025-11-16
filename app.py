@@ -2444,12 +2444,16 @@ if 'relatorio_tecnico' in st.session_state:
 
     if st.button("📥 Baixar PDF"):
         try:
+            img_best = st.session_state.get("best_model_image", None)
+            img_feat = st.session_state.get("features_image", None)
+            
             pdf_bytes = gerar_pdf_completo(
                 filial,
                 m_class_total, m_arima_total, m_ml_total,
                 m_class_pos, m_arima_pos, m_ml_pos,
-                st.session_state["relatorio_tecnico"],
-                buf.getvalue()
+                st.session_state['relatorio_tecnico'],
+                img_best,
+                img_feat
             )
 
             st.download_button(
@@ -2460,6 +2464,7 @@ if 'relatorio_tecnico' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

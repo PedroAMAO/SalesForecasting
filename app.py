@@ -2217,6 +2217,37 @@ if st.session_state.get("best_model_ready", False):
                 # ====== preparar imagem ======
                 img_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
+
+                # ======================================================
+                # Arquitetura do Meta-Modelo (Random Forest)
+                # ======================================================
+                if usar_ml:
+                    arch_ml_text = f"""
+                ### 5.2 Arquitetura do Meta-Modelo (Random Forest)
+                
+                Para aprimorar a previsibilidade e capturar estruturas não-lineares na série, 
+                foi empregado um **Random Forest Regressor**, configurado com:
+                
+                • n_estimators = 500 — uma floresta densa, aumentando estabilidade estatística;  
+                • max_depth = None — profundidade ilimitada, permitindo capturar relações complexas;  
+                • min_samples_split = 2 — divisão permissiva, adequada para séries pequenas;  
+                • min_samples_leaf = 1 — folhas pequenas para maior granularidade;  
+                • max_features = "sqrt" — estratégia robusta para problemas tabulares;  
+                • n_jobs = -1 — paralelização total;  
+                • random_state = 42 — reprodutibilidade experimental.
+                
+                Esse modelo opera como um **meta-modelo híbrido**, complementando a abordagem
+                clássica (Tendência + Sazonalidade + ARIMA) ao aprender padrões residuais, 
+                interações defasadas, estruturas não-lineares e componentes que fogem do
+                modelo paramétrico tradicional.
+                """
+                else:
+                    arch_ml_text = ""
+
+                
+                
+                
+                
                 # ====== puxar importância das features (se houver) ======
                 feat_block = ""
                 if usar_ml and "importancia_features" in st.session_state:
@@ -2250,30 +2281,44 @@ da filial "{filial}". O relatório deve ter clareza, rigor e estrutura similar a
 
 ## 1. Introdução Metodológica
 Explique detalhadamente:
-• decomposição logarítmica;
-• tendência (Linear, Quadrática ou Média);
+• decomposição logarítmica da série;
+• modelagem de tendência (Linear, Quadrática ou Média);
 • sazonalidade média mensal;
-• reconstrução do nível;
-• modelagem do ruído via ARIMA({p},{d},{q});
-• forecast do nível + ruído;
-• avaliação Rolling-Origin (evita vazamento);
-• meta-modelo ML (se ativo) como modelo híbrido.
+• reconstrução do nível original;
+• modelagem dos resíduos via ARIMA({p},{d},{q});
+    - Faça a interpretação de cada parâmetro do ARIMA
+• forecast do nível + ruído predito;
+• avaliação Rolling-Origin (evita vazamento e simula tempo real);
+• meta-modelo de Machine Learning (se ativo) como camada híbrida.
+    Arquitetura do ML utilizada:
+    {arch_ml_text}
 
 ## 2. Metodologia Aplicada ao Caso
-Explique o passo a passo utilizado neste dataset:
+Explique o passo a passo do estudo:
 • data de corte: {data_corte.date()};
 • horizonte de previsão: {meses_a_frente} meses;
 • ML ativo: {usar_ml};
-• seleção do melhor modelo via Rolling;
-• construção do IC dinâmico.
+• seleção do melhor modelo via Rolling-Origin H-Passo;
+• estruturação das features, janelas e lags;
+• **Construção do Intervalo de Confiança Dinâmico:**
+    O intervalo de confiança dinâmico é construído empiricamente com base no erro real
+    observado em múltiplas janelas Rolling-Origin. Para cada horizonte h, calcula-se:
+        – média do erro percentual real no horizonte h;
+        – desvio padrão desse erro;
+        – banda dinâmica: e_bound(h) = mean_erro(h) + 1.64 * std_erro(h);
+    O IC final é:
+        IC_inf(h) = yhat(h) * (1 - e_bound(h))
+        IC_sup(h) = yhat(h) * (1 + e_bound(h))
+    Isso gera um IC adaptativo ao horizonte, sensível à volatilidade e não dependente de
+    pressupostos teóricos de distribuição.
 
 ## 3. Resultados Empíricos
 Analise o gráfico enviado (nível + IC):
-• padrão da série;
+• padrão geral da série e comportamento estrutural;
 • aderência da tendência;
-• comportamento dos resíduos;
+• comportamento dos resíduos estimados;
 • estabilidade da previsão pós-corte;
-• comportamento do intervalo de confiança.
+• ajuste e amplitude do intervalo de confiança.
 
 ## 4. Desempenho Quantitativo
 Utilize as métricas observadas:
@@ -2282,14 +2327,14 @@ Clássico → MAPE={m_class_total['MAPE (%)']:.2f}%, R²={m_class_total['R²']:.
 ARIMA    → MAPE={m_arima_total['MAPE (%)']:.2f}%, R²={m_arima_total['R²']:.3f}
 {"ML       → MAPE="+str(round(m_ml_total['MAPE (%)'],2))+"%, R²="+str(round(m_ml_total['R²'],3)) if usar_ml else ""}
 
-Discuta o que cada métrica indica e compare os métodos.
+Discuta o que cada métrica revela sobre acurácia, estabilidade e aderência do modelo.
 
 ## 5. Discussão dos Resultados
 Aborde:
-• capacidade do modelo em capturar ciclos e rupturas; 
-• sensibilidade a mudanças regime;
-• desempenho rolling;
-• robustez temporal.
+• capacidade do modelo em capturar ciclos e identificar rupturas; 
+• sensibilidade a mudanças de regime e padrões atípicos;
+• desempenho observado nas simulações rolling;
+• robustez temporal e consistência do melhor modelo.
 
 {feat_block}
 
@@ -2299,11 +2344,11 @@ Aborde:
 ## 7. Conclusão
 De forma objetiva:
 • qual modelo é mais adequado e por quê;
-• limitações atuais;
-• recomendações de futuro (ML mais profundo, variáveis externas, sazonalidade dinâmica, redes neurais).
+• limitações atuais do pipeline;
+• recomendações futuras (modelos híbridos mais profundos, variáveis externas, sazonalidade dinâmica, CNNs, RNNs etc.).
 
 Produza texto claro, técnico, estruturado e com tom profissional.
-                """
+"""
 
                 # ====== chamada LLM ======
                 response = client.chat.completions.create(
@@ -2360,6 +2405,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

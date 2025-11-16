@@ -544,6 +544,7 @@ def rolling_eval(df_filial, modelo, meses_a_frente=1, janela_minima=12):
 def gerar_pdf_completo(
     filial,
     m_class_total, m_arima_total, m_ml_total,
+    tabela_previsoes,
     m_class_pos, m_arima_pos, m_ml_pos,
     relatorio_texto,
     img_best_model,
@@ -632,6 +633,35 @@ def gerar_pdf_completo(
 
     story.append(tabela)
     story.append(Spacer(1, 1*cm))
+    # =============================
+    # TABELA DE PREVISÕES FUTURAS
+    # =============================
+    if tabela_previsoes is not None:
+        story.append(Paragraph("<b>Previsões Futuras</b>", styles["Heading2"]))
+        story.append(Spacer(1, 0.3*cm))
+    
+        dados_prev = [["Data", "h", "Previsão", "IC_Inf", "IC_Sup"]]
+    
+        for _, row in tabela_previsoes.iterrows():
+            dados_prev.append([
+                row["data"].strftime("%Y-%m"),
+                str(row["horizonte"]),
+                f"{row['previsao']:.2f}",
+                f"{row['ic_inf']:.2f}",
+                f"{row['ic_sup']:.2f}",
+            ])
+    
+        tabela_prev = Table(dados_prev)
+        tabela_prev.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+            ('GRID', (0,0), (-1,-1), 0.4, colors.black),
+            ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+            ('FONTSIZE', (0,0), (-1,-1), 9),
+            ('ALIGN', (1,1), (-1,-1), 'CENTER')
+        ]))
+    
+        story.append(tabela_prev)
+        story.append(Spacer(1, 0.8*cm))
 
     # =============================
     # INTERPRETAÇÃO LLM
@@ -2201,6 +2231,29 @@ if usar_best_model:
     df_melhor_prev_ic = aplicar_ic_h(df_melhor_prev, resumo_h, data_corte)
 
 
+    # ===============================
+    # 📊 TABELA DE PREVISÕES FUTURAS
+    # ===============================
+    df_futuro = df_melhor_prev_ic[df_melhor_prev_ic["data"] > data_corte].copy()
+    
+    # adiciona horizonte h (1,2,3,...)
+    df_futuro = df_futuro.sort_values("data").reset_index(drop=True)
+    df_futuro["horizonte"] = df_futuro.index + 1
+    
+    # organiza colunas
+    df_futuro_show = df_futuro[[
+        "data",
+        "horizonte",
+        "previsao",
+        "ic_inf",
+        "ic_sup"
+    ]]
+    
+    st.markdown("## 📋 Tabela de Previsões Futuras")
+    st.dataframe(df_futuro_show, use_container_width=True)
+    
+    # salvar para PDF depois
+    st.session_state["tabela_previsoes"] = df_futuro_show
 
 
 
@@ -2475,6 +2528,7 @@ if 'relatorio_tecnico' in st.session_state:
             pdf_bytes = gerar_pdf_completo(
                 filial,
                 m_class_total, m_arima_total, m_ml_total,
+                st.session_state.get("tabela_previsoes"),   # ← AQUI!!!
                 m_class_pos, m_arima_pos, m_ml_pos,
                 st.session_state['relatorio_tecnico'],
                 img_best,
@@ -2489,6 +2543,7 @@ if 'relatorio_tecnico' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

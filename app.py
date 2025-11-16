@@ -23,6 +23,70 @@ from reportlab.lib import colors
 #from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.ensemble import RandomForestRegressor
 
+
+def traduz_feature(nome):
+    # Mapeamento específico
+    base_map = {
+        "feat_prev_cl_t": "Previsão Clássica (t)",
+        "feat_prev_ar_t": "Previsão ARIMA (t)",
+        "feat_mes_sin": "Sazonalidade — Seno",
+        "feat_mes_cos": "Sazonalidade — Cosseno",
+    }
+
+    if nome in base_map:
+        return base_map[nome]
+
+    # Lags de realizado
+    if nome.startswith("lag_y_"):
+        k = nome.split("_")[2]
+        return f"Lag Realizado (t-{k})"
+
+    # Lags do clássico
+    if nome.startswith("lag_cl_"):
+        k = nome.split("_")[2]
+        return f"Lag Clássico (t-{k})"
+
+    # Lags ARIMA
+    if nome.startswith("lag_ar_"):
+        k = nome.split("_")[2]
+        return f"Lag ARIMA (t-{k})"
+
+    # Erros
+    if nome.startswith("err_cl_"):
+        k = nome.split("_")[2]
+        return f"Erro Clássico (t-{k})"
+
+    if nome.startswith("err_ar_"):
+        k = nome.split("_")[2]
+        return f"Erro ARIMA (t-{k})"
+
+    # Deltas
+    if nome.startswith("delta_y_"):
+        k = nome.split("_")[2]
+        return f"Δ Realizado (t-{k})"
+
+    if nome.startswith("delta_cl_"):
+        k = nome.split("_")[2]
+        return f"Δ Clássico (t-{k})"
+
+    if nome.startswith("delta_ar_"):
+        k = nome.split("_")[2]
+        return f"Δ ARIMA (t-{k})"
+
+    if nome.startswith("delta_err_cl_"):
+        k = nome.split("_")[3]
+        return f"Δ Erro Clássico (t-{k})"
+
+    if nome.startswith("delta_err_ar_"):
+        k = nome.split("_")[3]
+        return f"Δ Erro ARIMA (t-{k})"
+
+    return nome  # fallback elegante
+
+
+
+
+
 @st.cache_data(show_spinner=False)
 def carregar_e_preparar_base(arquivo_bytes: bytes, nome_arquivo: str):
     import io
@@ -1770,27 +1834,6 @@ if rodar_rolling:
 
     st.pyplot(fig2)
 
-# ======================================================
-# 📚 DICIONÁRIO DE FEATURES (nomes amigáveis)
-# ======================================================
-
-dict_feats = {
-    # previsões estruturais
-    "prev_cl_t": "Previsão Clássica (t)",
-    "prev_ar_t": "Previsão ARIMA (t)",
-
-    # erros
-    "erro_classico": "Erro do Modelo Clássico",
-    "erro_arima": "Erro do ARIMA",
-
-    # dinâmicas
-    "delta_t": "Variação Mensal (ΔY)",
-    "delta_cl_ar": "Diferença Clássico - ARIMA",
-}
-
-# adiciona lags automaticamente
-for i in range(1, lag_window + 1):
-    dict_feats[f"lag_{i}"] = f"Lag de {i} mês(es)"
 
 
 
@@ -1806,59 +1849,19 @@ if usar_ml:
 
         importancias = modelo_ml.feature_importances_
 
+        # Base
         df_feat_imp = pd.DataFrame({
             "feature": feature_cols,
             "importance": importancias
         }).sort_values("importance", ascending=False)
 
         # ======================================================
-        # 📚 Tradução dos nomes via dicionário + fallback automático
+        # 📚 Tradução via tradutor universal já definido no início do app
         # ======================================================
-        def traduz_feat(feat):
-            if feat in dict_feats:
-                return dict_feats[feat]
-
-            # padrões automáticos
-            if feat.startswith("lag_y_"):
-                n = feat.split("_")[-1]
-                return f"Lag Realizado (t-{n})"
-            if feat.startswith("lag_cl_"):
-                n = feat.split("_")[-1]
-                return f"Lag Clássico (t-{n})"
-            if feat.startswith("lag_ar_"):
-                n = feat.split("_")[-1]
-                return f"Lag ARIMA (t-{n})"
-
-            if feat.startswith("err_cl_"):
-                n = feat.split("_")[-1]
-                return f"Erro Clássico (t-{n})"
-            if feat.startswith("err_ar_"):
-                n = feat.split("_")[-1]
-                return f"Erro ARIMA (t-{n})"
-
-            if feat.startswith("delta_y_"):
-                n = feat.split("_")[-1]
-                return f"Δ Realizado (t-{n})"
-            if feat.startswith("delta_cl_"):
-                n = feat.split("_")[-1]
-                return f"Δ Clássico (t-{n})"
-            if feat.startswith("delta_ar_"):
-                n = feat.split("_")[-1]
-                return f"Δ ARIMA (t-{n})"
-
-            if feat.startswith("delta_err_cl_"):
-                n = feat.split("_")[-1]
-                return f"Δ Erro Clássico (t-{n})"
-            if feat.startswith("delta_err_ar_"):
-                n = feat.split("_")[-1]
-                return f"Δ Erro ARIMA (t-{n})"
-
-            return feat
-
-        df_feat_imp["feature_friendly"] = df_feat_imp["feature"].apply(traduz_feat)
+        df_feat_imp["feature_friendly"] = df_feat_imp["feature"].apply(traduz_feature)
 
         # ======================================================
-        # 📈 CURVA ABC — cálculo da importância acumulada
+        # 📈 Curva ABC
         # ======================================================
         total_import = df_feat_imp["importance"].sum()
         df_feat_imp["import_pct"] = df_feat_imp["importance"] / total_import
@@ -1871,22 +1874,22 @@ if usar_ml:
 
         df_feat_imp["classe"] = df_feat_imp["import_acum"].apply(classifica_curvaA)
 
-        st.dataframe(df_feat_imp[["feature_friendly","importance","import_pct","import_acum","classe"]])
+        st.dataframe(df_feat_imp[["feature_friendly", "importance", "import_pct", "import_acum", "classe"]])
 
-        # salva p/ relatório
+        # Guarda para relatório
         st.session_state["importancia_features"] = df_feat_imp
 
         # ======================================================
-        # 🎨 GRÁFICO — Top 15 com CURVA ABC destacada
+        # 🎨 Gráfico ABC (Top 15)
         # ======================================================
         fig_imp, ax_imp = plt.subplots(figsize=(10, 8))
         top_k = df_feat_imp.head(15).sort_values("importance")
 
-        # cores por classe
+        # Paleta
         cor_map = {
-            "A": "#2E8B57",   # verde forte
-            "B": "#f2c94c",   # amarelo
-            "C": "#bdbdbd"    # cinza claro
+            "A": "#2E8B57",  # verde
+            "B": "#f2c94c",  # amarelo
+            "C": "#bdbdbd"   # cinza
         }
 
         cores = top_k["classe"].map(cor_map)
@@ -1900,7 +1903,6 @@ if usar_ml:
 
     except Exception as e:
         st.warning(f"Não foi possível calcular importâncias de features: {e}")
-
 
 # ===============================
 # Usar melhor Modelo
@@ -2308,6 +2310,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

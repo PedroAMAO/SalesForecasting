@@ -2503,7 +2503,7 @@ Produza texto claro, técnico, estruturado e com tom profissional.
                         }
                     ],
                     temperature=0.35,
-                    max_tokens=2000
+                    max_tokens=3000
                 )
 
                 relatorio = response.choices[0].message.content
@@ -2546,6 +2546,7 @@ if 'relatorio_tecnico' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

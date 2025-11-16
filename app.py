@@ -1167,7 +1167,7 @@ df_filial['t'] = np.arange(len(df_filial))
 df_filial['mes_num'] = df_filial['data'].dt.month
 
 datas = df_filial['data'].tolist()
-default_corte = datas[-4] if len(datas) >= 4 else datas[-1]
+default_corte = datas[-3] if len(datas) >= 3 else datas[-1]
 data_corte = st.select_slider("📅 Data de corte para previsão", options=datas, value=default_corte)
 
 #tipo_tendencia = st.selectbox("📈 Tipo de Tendência", [ "Linear", "Quadrática","Média"])
@@ -2210,6 +2210,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

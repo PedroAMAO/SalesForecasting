@@ -1769,8 +1769,33 @@ if rodar_rolling:
     ax2.legend()
 
     st.pyplot(fig2)
+
 # ======================================================
-# 🧬 Importância das Features (Random Forest)
+# 📚 DICIONÁRIO DE FEATURES (nomes amigáveis)
+# ======================================================
+
+dict_feats = {
+    # previsões estruturais
+    "prev_cl_t": "Previsão Clássica (t)",
+    "prev_ar_t": "Previsão ARIMA (t)",
+
+    # erros
+    "erro_classico": "Erro do Modelo Clássico",
+    "erro_arima": "Erro do ARIMA",
+
+    # dinâmicas
+    "delta_t": "Variação Mensal (ΔY)",
+    "delta_cl_ar": "Diferença Clássico - ARIMA",
+}
+
+# adiciona lags automaticamente
+for i in range(1, lag_window + 1):
+    dict_feats[f"lag_{i}"] = f"Lag de {i} mês(es)"
+
+
+
+# ======================================================
+# 🧬 Importância das Features (Random Forest) + Curva ABC
 # ======================================================
 if usar_ml:
     st.markdown("## 🧬 Importância das Features (Modelo ML)")
@@ -1786,18 +1811,91 @@ if usar_ml:
             "importance": importancias
         }).sort_values("importance", ascending=False)
 
-        st.dataframe(df_feat_imp)
+        # ======================================================
+        # 📚 Tradução dos nomes via dicionário + fallback automático
+        # ======================================================
+        def traduz_feat(feat):
+            if feat in dict_feats:
+                return dict_feats[feat]
 
-        # --- salvar para o relatório técnico ---
+            # padrões automáticos
+            if feat.startswith("lag_y_"):
+                n = feat.split("_")[-1]
+                return f"Lag Realizado (t-{n})"
+            if feat.startswith("lag_cl_"):
+                n = feat.split("_")[-1]
+                return f"Lag Clássico (t-{n})"
+            if feat.startswith("lag_ar_"):
+                n = feat.split("_")[-1]
+                return f"Lag ARIMA (t-{n})"
+
+            if feat.startswith("err_cl_"):
+                n = feat.split("_")[-1]
+                return f"Erro Clássico (t-{n})"
+            if feat.startswith("err_ar_"):
+                n = feat.split("_")[-1]
+                return f"Erro ARIMA (t-{n})"
+
+            if feat.startswith("delta_y_"):
+                n = feat.split("_")[-1]
+                return f"Δ Realizado (t-{n})"
+            if feat.startswith("delta_cl_"):
+                n = feat.split("_")[-1]
+                return f"Δ Clássico (t-{n})"
+            if feat.startswith("delta_ar_"):
+                n = feat.split("_")[-1]
+                return f"Δ ARIMA (t-{n})"
+
+            if feat.startswith("delta_err_cl_"):
+                n = feat.split("_")[-1]
+                return f"Δ Erro Clássico (t-{n})"
+            if feat.startswith("delta_err_ar_"):
+                n = feat.split("_")[-1]
+                return f"Δ Erro ARIMA (t-{n})"
+
+            return feat
+
+        df_feat_imp["feature_friendly"] = df_feat_imp["feature"].apply(traduz_feat)
+
+        # ======================================================
+        # 📈 CURVA ABC — cálculo da importância acumulada
+        # ======================================================
+        total_import = df_feat_imp["importance"].sum()
+        df_feat_imp["import_pct"] = df_feat_imp["importance"] / total_import
+        df_feat_imp["import_acum"] = df_feat_imp["import_pct"].cumsum()
+
+        def classifica_curvaA(x):
+            if x <= 0.80: return "A"
+            if x <= 0.95: return "B"
+            return "C"
+
+        df_feat_imp["classe"] = df_feat_imp["import_acum"].apply(classifica_curvaA)
+
+        st.dataframe(df_feat_imp[["feature_friendly","importance","import_pct","import_acum","classe"]])
+
+        # salva p/ relatório
         st.session_state["importancia_features"] = df_feat_imp
 
-        # --- gráfico ---
-        fig_imp, ax_imp = plt.subplots(figsize=(10, 6))
-        top_k = df_feat_imp.head(15)
+        # ======================================================
+        # 🎨 GRÁFICO — Top 15 com CURVA ABC destacada
+        # ======================================================
+        fig_imp, ax_imp = plt.subplots(figsize=(10, 8))
+        top_k = df_feat_imp.head(15).sort_values("importance")
 
-        ax_imp.barh(top_k["feature"], top_k["importance"])
-        ax_imp.invert_yaxis()
-        ax_imp.set_title("Top 15 Features Mais Relevantes (ML)")
+        # cores por classe
+        cor_map = {
+            "A": "#2E8B57",   # verde forte
+            "B": "#f2c94c",   # amarelo
+            "C": "#bdbdbd"    # cinza claro
+        }
+
+        cores = top_k["classe"].map(cor_map)
+
+        ax_imp.barh(top_k["feature_friendly"], top_k["importance"], color=cores)
+        ax_imp.set_title("Top 15 Features — Importância (Curva ABC)")
+        ax_imp.set_xlabel("Importância Relativa (Random Forest)")
+        plt.tight_layout()
+
         st.pyplot(fig_imp)
 
     except Exception as e:
@@ -2210,6 +2308,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

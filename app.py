@@ -2448,7 +2448,7 @@ if 'relatorio_tecnico' in st.session_state:
                 filial,
                 m_class_total, m_arima_total, m_ml_total,
                 m_class_pos, m_arima_pos, m_ml_pos,
-                st.session_state['relatorio_llm'],
+                st.session_state["relatorio_tecnico"],
                 buf.getvalue()
             )
 
@@ -2460,6 +2460,7 @@ if 'relatorio_tecnico' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

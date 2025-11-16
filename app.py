@@ -2027,167 +2027,130 @@ if usar_best_model:
 
 
 
-
-
-
 # ===============================
-# Diagnóstico LLM — Interpretação Automática
+# 🧩 Relatório Técnico (LLM)
 # ===============================
-from openai import OpenAI
 
-st.markdown("---")
-st.header("🧩 Interpretação Automática das Previsões")
+if usar_best_model:
 
-context_file = st.file_uploader(
-    "📎 Anexar arquivo de contexto (opcional)",
-    type=["pdf"]
-)
+    st.markdown("---")
+    st.header("📘 Relatório Técnico — Interpretação Acadêmico-Aplicada")
 
-if st.button("🧠 Gerar Interpretação com LLM"):
+    st.info(
+        "O relatório só pode ser gerado após a escolha do Melhor Modelo "
+        "e a construção do gráfico com Intervalo de Confiança Dinâmico."
+    )
 
-    with st.spinner("Analisando resultados e gerando interpretação..."):
-        try:
-            client = OpenAI(api_key=st.secrets["openai_api_key"])
-            context_text = ""
+    context_file = st.file_uploader(
+        "📎 (Opcional) Anexar arquivo de contexto organizacional",
+        type=["pdf"]
+    )
 
-            # ======================================================
-            # 🔧 BLOCO OPCIONAL — Rolling
-            # ======================================================
-            rolling_text = ""
-            rolling_explicacao = """
-A Avaliação Rolling simula como cada modelo teria performado caso estivéssemos,
-oricamente, em “tempo real”. Ou seja: em cada mês t, o modelo é treinado
-usando apenas os dados disponíveis até t, e faz uma previsão para t+1.
+    if st.button("🧠 Gerar Relatório Técnico"):
 
-Esse procedimento evita absolutamente qualquer vazamento e mede:
-• estabilidade temporal do modelo,
-• robustez da tendência e da sazonalidade,
-• sensibilidade a mudanças de regime,
-• consistência real do modelo ao longo da série.
+        with st.spinner("Gerando relatório técnico..."):
 
-É um teste muito mais rigoroso e próximo da vida real do que avaliar apenas o
-período pós-corte atual.
-"""
+            try:
+                from openai import OpenAI
+                client = OpenAI(api_key=st.secrets["openai_api_key"])
 
-            # ======================================================
-            # MÉTRICAS DO ROLLING (se existirem)
-            # ======================================================
-            if "df_roll_class" in locals():
+                # ====== extrair contexto opcional ======
+                context_text = ""
+                if context_file:
+                    context_text = extract_context_text(context_file)[:15000]
 
-                mape_class_roll = df_roll_class["erro_pct"].mean() * 100
-                err_class_roll = df_roll_class["erro_abs"].mean()
+                # ====== preparar imagem ======
+                img_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
-                mape_arima_roll = df_roll_arima["erro_pct"].mean() * 100
-                err_arima_roll = df_roll_arima["erro_abs"].mean()
+                # ====== gerar prompt técnico ======
+                prompt = f"""
+Produza um RELATÓRIO TÉCNICO, com tom acadêmico e aplicado, sobre a previsão de vendas
+da filial "{filial}". O relatório deve ter clareza, rigor e estrutura similar a um artigo técnico.
 
-                rolling_text += f"""
-### 📉 Avaliação Rolling (1 passo à frente — realista)
+## 1. Introdução Metodológica
+Explique de forma didática, porém rigorosa:
+• decomposição logarítmica da série;
+• modelagem de tendência (Linear, Quadrática ou Média);
+• sazonalidade média mensal;
+• modelagem dos resíduos por ARIMA (({p},{d},{q}));
+• reconstrução do nível;
+• lógica do forecast futurístico;
+• avaliação Rolling-Origin;
+• lógica do Meta-Model (ML), se ativo.
 
-- **Modelo Clássico**
-    • MAPE médio rolling = {mape_class_roll:.2f}%  
-    • Erro Absoluto Médio = {err_class_roll:.2f}
+## 2. Metodologia Aplicada ao Caso
+Explique como o dataset foi processado:
+• data de corte: {data_corte.date()};
+• horizonte de previsão: {meses_a_frente} meses;
+• se ML estava ativo: {usar_ml};
+• como o melhor modelo foi selecionado via Rolling.
 
-- **Modelo ARIMA**
-    • MAPE médio rolling = {mape_arima_roll:.2f}%  
-    • Erro Absoluto Médio = {err_arima_roll:.2f}
-"""
+## 3. Resultados Empíricos
+Analise o comportamento do gráfico enviado:
+• padrão da série;
+• aderência da tendência;
+• comportamento do ruído;
+• aderência pós-corte;
+• qualidade do IC dinâmico;
+• como o modelo reage a mudanças de regime.
 
-                if usar_ml and "df_roll_ml" in locals():
-                    mape_ml_roll = df_roll_ml["erro_pct"].mean() * 100
-                    err_ml_roll = df_roll_ml["erro_abs"].mean()
+## 4. Desempenho Quantitativo
+Utilize as métricas:
 
-                    rolling_text += f"""
-- **Modelo ML**
-    • MAPE médio rolling = {mape_ml_roll:.2f}%  
-    • Erro Absoluto Médio = {err_ml_roll:.2f}
-"""
-            else:
-                rolling_text = "Nenhuma avaliação rolling foi executada."
+Clássico → MAPE={m_class_total['MAPE (%)']:.2f}%, R²={m_class_total['R²']:.3f}
+ARIMA    → MAPE={m_arima_total['MAPE (%)']:.2f}%, R²={m_arima_total['R²']:.3f}
+{"ML       → MAPE="+str(round(m_ml_total['MAPE (%)'],2))+"%, R²="+str(round(m_ml_total['R²'],3)) if usar_ml else ""}
 
-            # ======================================================
-            # BLOCO ML
-            # ======================================================
-            if usar_ml:
-                bloco_ml = f"""
-- Modelo de Machine Learning (XGBoost):
-    • Lags utilizados: {lag_window}
-    • MAPE = {m_ml_total['MAPE (%)']:.2f}%
-    • R² = {m_ml_total['R²']:.3f}
-    • RMSE = {m_ml_total['RMSE']:.2f}
-"""
-            else:
-                bloco_ml = ""
+Inclua comentários técnicos sobre o que estas métricas revelam.
 
-            # ======================================================
-            # PROMPT
-            # ======================================================
-            prompt = f"""
-Analise tecnicamente os resultados da previsão de vendas da filial "{filial}".
+## 5. Discussão dos Resultados
+Aborde:
+• se o modelo captura bem o padrão da filial; 
+• se há sinais de ruptura estrutural;
+• influência de sazonalidades atípicas;
+• estabilidade temporal observada no Rolling.
 
-Use as métricas abaixo:
+## 6. Integração com o contexto (se houver)
+{context_text if context_text else "Nenhum contexto adicional fornecido."}
 
-- Modelo Clássico: MAPE = {m_class_total['MAPE (%)']:.2f}%, R² = {m_class_total['R²']:.3f}, RMSE = {m_class_total['RMSE']:.2f}
-- Modelo ARIMA:    MAPE = {m_arima_total['MAPE (%)']:.2f}%, R² = {m_arima_total['R²']:.3f}, RMSE = {m_arima_total['RMSE']:.2f}
-{bloco_ml}
+## 7. Conclusão
+De forma objetiva:
+• qual modelo é mais adequado e por quê;
+• limitações atuais;
+• recomendações futuras (ex.: dinâmica de sazonalidade, modelos híbridos, variáveis externas).
 
-### 🧠 O que analisar
-Produza uma interpretação clara e objetiva abordando:
-- Qual modelo performa melhor e por quais motivos;
-- Comportamento pós-corte: onde cada modelo acerta/erra;
-- Confiabilidade dos intervalos de confiança;
-- Possíveis causas para desvios (mudança de regime, sazonalidade atípica, rupturas);
-- Sugestões de melhoria (variáveis externas, sazonalidade dinâmica, janela de lags, ML etc.).
+Produza texto claro, técnico, estruturado e com tom profissional.
+                """
 
-### 🌀 Explicação da Avaliação Rolling
-{rolling_explicacao}
+                # ====== chamada LLM ======
+                response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system",
+                         "content": "Você é um especialista em previsões, modelos de séries temporais e análise quantitativa."},
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {"type": "image_url", "image_url": {
+                                    "url": f"data:image/png;base64,{img_base64}"
+                                }}
+                            ]
+                        }
+                    ],
+                    temperature=0.35,
+                    max_tokens=2000
+                )
 
-### 📉 Análise Rolling (resultado realista)
-{rolling_text}
+                relatorio = response.choices[0].message.content
 
-Se houver arquivo de contexto, integre os fatos relevantes e gere insights práticos.
-Mantenha tom consultivo, direto e técnico.
-"""
+                st.markdown("### 📄 Relatório Técnico Gerado:")
+                st.markdown(relatorio)
 
-            # contexto
-            if context_file:
-                context_text = extract_context_text(context_file)
+                st.session_state["relatorio_tecnico"] = relatorio
 
-            prompt += context_text[:15000] + "\n---\n"
-
-            # imagem
-            img_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "Você é um consultor sênior especializado em séries temporais e gestão comercial."
-                    },
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {
-                                "url": f"data:image/png;base64,{img_base64}"
-                            }}
-                        ]
-                    }
-                ],
-                temperature=0.4,
-                max_tokens=900
-            )
-
-            relatorio = response.choices[0].message.content
-
-            st.markdown("### 📊 Interpretação Gerada:")
-            st.markdown(relatorio)
-
-            st.session_state['relatorio_llm'] = relatorio
-
-        except Exception as e:
-            st.error(f"Erro ao gerar interpretação: {e}")
-
+            except Exception as e:
+                st.error(f"Erro ao gerar relatório técnico: {e}")
 
 # ===============================
 # 📄 PDF FINAL (sempre aparece depois de já existir relatório)
@@ -2214,6 +2177,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

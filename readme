@@ -1,103 +1,214 @@
-📈 Plataforma de Previsão de Vendas — Tendência + ARIMA + Machine Learning
+📈 Forecaster Híbrido — Tendência + Sazonalidade + ARIMA + ML
 
-Este projeto implementa um sistema completo de previsão de vendas, combinando:
+Este projeto é uma aplicação em Streamlit para previsão de vendas (ou séries temporais similares) usando uma arquitetura híbrida:
 
-Modelo Clássico (tendência + sazonalidade média),
+Modelo Clássico (Tendência + Sazonalidade Média em log),
 
-ARIMA (modelagem de ruído no log),
+ARIMA aplicado ao ruído da decomposição,
 
-Meta-Modelo de Machine Learning (XGBoost com lags, deltas e erros históricos),
+Meta-modelo de Machine Learning (Random Forest) em cima de lags, erros e deltas,
 
-Rolling Evaluation (1-step ahead) — totalmente realista, sem vazamento,
+Seleção automática do melhor modelo via Rolling Evaluation por horizonte (H-passo),
 
-Interpretação Automática via LLM,
+Construção de Intervalo de Confiança Dinâmico por horizonte,
 
-Exportação de Relatório Profissional em PDF.
+Interpretação automática via LLM (OpenAI),
 
-Tudo Isso dentro de uma aplicação Streamlit simples de operar.
+Geração de Relatório Profissional em PDF com gráfico, métricas, tabela de previsão e análise técnica.
 
-🚀 Funcionalidades Principais
-🔹 1. Upload de base
+Tudo isso com uma interface simples, clicável e (quase) à prova de susto.
 
-O app lê um .xlsx com as colunas:
+🚀 Principais Funcionalidades
+🔹 1. Upload da Base
 
-Ano
+O app lê um arquivo Excel (.xlsx) com as colunas:
 
-Mês
+ano
+
+mês ou mes
 
 Filial
 
 Realizado
 
-O sistema aceita variações de maiúsculas/minúsculas e nomes alternativos.
+Ele é tolerante com:
 
-🔹 2. Pré-processamento automático
+Variações de maiúsculas/minúsculas,
 
-O pipeline automaticamente:
+Colunas com nomes próximos (ex.: “Ano Base”, “Filial XYZ”, “Realizado R$”).
 
-Converte ano/mês para datas mensais (YYYY-MM-01)
+A leitura é feita via:
 
-Calcula participação da filial (“Real Share %”) caso desejado
+safe_sheet_read → tenta usar a aba Planilha1, se não existir, pega a primeira,
 
-Organiza série temporal
+normalize_columns → padroniza nomes, ajusta mês/mes, identifica Filial e Realizado.
 
-Cria coluna t (índice temporal)
+🔹 2. Pré-processamento Automático
 
-Limpa e padroniza colunas
+Após o upload, o pipeline:
 
-🔹 3. Três Modelos de Previsão
-📌 Modelo Clássico
+Converte ano + mes em uma data mensal (YYYY-MM-01),
 
-Baseado em:
+Cria uma linha agregada de Total (somatório das filiais),
 
-Tendência linear, quadrática ou média
+Calcula a participação da filial (pct_filial) em relação ao total do mês,
 
-Sazonalidade média histórica
+Ordena a série temporal,
 
-Intervalo de confiança via ruído estrutural
+Cria:
 
-📌 ARIMA (Resíduos)
+t → índice temporal (0, 1, 2, ...),
 
-Modela o ruído do log da série depois de tirar tendência + sazonalidade.
+mes_num → número do mês (1–12),
 
-Com:
+Define a coluna alvo (normalmente Real R$).
 
-ARIMA manual (p,d,q)
+Obs.: O app já está preparado para trabalhar com share (%), mas no código atual o modo ativo é Real R$.
 
-OU otimização automática (grid + rolling-origin cross-validation)
+🔹 3. Modelos de Previsão
+📌 Modelo Clássico (Tendência + Sazonalidade Média)
 
-📌 Meta-Modelo ML (XGBoost)
+Implementado na classe ClassicalTrendSeasonalModel, ele trabalha em log:
 
-Utiliza:
+Log da série: log(alvo + 1),
 
-Lags de Y
+Tendência:
 
-Lags do clássico e ARIMA
+Linear (padrão),
 
-Erros passados
+Quadrática ou Média (já suportadas na arquitetura),
 
-Deltas
+Sazonalidade:
 
-Features sazonais (sen/cos)
+Média mensal dos resíduos (um fator por mês),
 
-Previsão recursiva sem vazamento
+Ruído:
+
+ruido = residuo - sazonalidade,
+
+Estimativa do desvio padrão sigma_ruido em log.
+
+Para cada ponto, o modelo retorna:
+
+Previsão no nível,
+
+ic_inf e ic_sup usando 2,57·σ em log (≈99%),
+
+yhat_log.
+
+📌 ARIMA sobre o Ruído
+
+O ARIMA é ajustado nos resíduos do modelo clássico:
+
+treinar_arima_ruido(df_treino, order) ajusta um ARIMA em ruido,
+
+Ordem (p, d, q) pode ser:
+
+Definida inicialmente como "0,0,0",
+
+Otimizada automaticamente via otimizar_arima com Rolling-Origin:
+
+Para cada combinação de (p, d, q),
+
+Faz forecast one-step ahead do ruído,
+
+Calcula erro médio (MAPE-like ou RMSE),
+
+Escolhe o melhor conjunto.
+
+O app então:
+
+Reconstrói o ruído em três blocos:
+
+A: resíduos fitted,
+
+B: forecast até o fim do histórico,
+
+C: forecast para meses futuros,
+
+Soma tendência + sazonalidade + ruído em log,
+
+Volta para o nível: exp(yhat_log) - 1.
+
+📌 Meta-Modelo de Machine Learning (Random Forest)
+
+Quando o usuário marca “🤖 Ativar previsão com Machine Learning (ML)”, entra o meta-modelo:
+
+Algoritmo: RandomForestRegressor com:
+
+n_estimators = 500
+
+max_depth = None
+
+max_features = "sqrt"
+
+n_jobs = -1
+
+random_state = 42
+
+Features geradas em build_lags:
+
+Lags de:
+
+alvo → lag_y_k,
+
+previsão Clássica → lag_cl_k,
+
+previsão ARIMA → lag_ar_k,
+
+Erros defasados:
+
+err_cl_k = lag_y_k - lag_cl_k,
+
+err_ar_k = lag_y_k - lag_ar_k,
+
+Deltas entre lags:
+
+delta_y_k, delta_cl_k, delta_ar_k,
+
+delta_err_cl_k, delta_err_ar_k,
+
+Features contemporâneas:
+
+feat_prev_cl_t, feat_prev_ar_t,
+
+feat_t (tempo),
+
+feat_mes_sin, feat_mes_cos (sazonalidade circular).
+
+O treino é sempre cortado em data_corte para evitar vazamento.
+
+O forecast futuro é feito via next_step_predict, atualizando recursivamente:
+
+Lags de Y,
+
+Lags de Clássico/ARIMA,
+
+Erros e deltas,
+
+Tempo e mês.
 
 🎨 Visualizações
 
-O app gera um gráfico master:
+O app gera um Gráfico Master com:
 
-Realizado (barras)
+Realizado → barras cinza,
 
-Clássico (linha preta + banda de IC futuro)
+Clássico → linha preta pontilhada,
 
-ARIMA (azul + banda de IC)
+ARIMA (Resíduos) → linha azul,
 
-ML (roxo)
+ML Meta-Model (se ativo) → linha roxa,
 
-Corte (linha vertical vermelha)
+Linha de corte → vertical vermelha,
+
+Ajuste automático do eixo Y com “respiro” abaixo do mínimo.
 
 📘 Métricas
-➤ Período Completo
+
+As métricas são calculadas para:
+
+Período Completo:
 
 MAPE (%)
 
@@ -105,92 +216,130 @@ R²
 
 RMSE
 
-➤ Pós-Corte
+Pós-corte (apenas datas > data_corte):
 
-Mostra apenas meses cuja previsão realmente importa.
+Mesmas métricas, para focar na parte que “vale” como previsão.
 
-🔁 Rolling Evaluation (Realista)
+Função central: metricas(df, col_pred, data_corte).
 
-O app implementa o rolling 1-step ahead, onde, para cada mês t:
+🔁 Rolling Evaluation & Melhor Modelo
 
-Treina o modelo usando apenas dados até t
+O app implementa duas camadas de Rolling:
 
-Prevê t+1
+Rolling 1-passo por corte (desligado por padrão no botão):
 
-Guarda erro realista (sem vazamento)
+Re-treinando Clássico / ARIMA / ML a cada corte,
 
-Disponível para:
+Calculando erro realista (sem olhar o futuro).
 
-Clássico
+Rolling por horizonte (H-passo) para escolha do melhor modelo:
 
-ARIMA
+rolling_arima_h e rolling_ml_h rodam os modelos para horizontes h = 1..H,
 
-ML (se ativado)
+Calculam erro_pct por horizonte,
 
-Gera:
+Função resumo_horizonte condensa:
 
-MAPE médio
+média do erro,
 
-Erro médio absoluto
+desvio padrão,
 
-Gráfico por data de corte
+banda e_bound(h) = mean + z·std (z = 1,64).
 
-🧩 Interpretação Automática via LLM
+O botão “🏆 Usar Melhor Modelo (Rolling + IC Dinâmico)”:
 
-A aplicação monta um prompt consultivo analisando:
+Compara os modelos (ARIMA e ML) pelo erro médio,
 
-Qual modelo performou melhor e por quê
+Seleciona o campeão,
 
-Leitura dos intervalos de confiança
+Gera um intervalo de confiança dinâmico por horizonte via aplicar_ic_h,
 
-Comportamento pós-corte
+Monta uma tabela de previsões futuras (tabela_previsoes) com:
 
-Explicação da Rolling Evaluation
+Data,
 
-Insights estratégicos para o gestor
+Horizonte h,
 
-O usuário pode anexar um PDF de contexto (opcional), e o texto será incorporado.
+Previsão,
 
-📄 Exportação em PDF
+IC inferior e superior.
 
-Gera um relatório completo contendo:
+🧬 Importância das Features (Curva ABC)
 
-Gráfico
+Quando o ML está ativo, o app:
 
-Métricas
+Calcula feature_importances_ da Random Forest,
 
-Interpretação do LLM
+Traduza os nomes técnicos via traduz_feature (lags, deltas, erros, sazonalidade),
 
-Tabela resumo dos modelos
+Monta uma Curva ABC:
 
-PDF é totalmente formatado via reportlab.
+Percentual de importância acumulado,
 
-🛠️ Instalação
+Classificação em A/B/C,
 
-Crie seu ambiente e instale as dependências:
+Exibe as top features e suas contribuições.
 
-pip install -r requirements.txt
+Também gera um gráfico horizontal com as Top 15 features e guarda a imagem para uso no PDF.
 
-▶️ Execução
-streamlit run Previsao_Vendas3.py
+🧠 Relatório Técnico via LLM (OpenAI)
 
-📂 Estrutura Sugerida do Projeto
-📁 previsao-vendas
-│
-├── Previsao_Vendas3.py
-├── requirements.txt
-├── README.md
-└── exemplos/
-    └── base_vendas.xlsx
+Depois de:
 
-⚙️ Requirements
-streamlit
-numpy
-pandas
-matplotlib
-scikit-learn
-statsmodels
-xgboost
+Escolher o melhor modelo,
+
+Gerar o gráfico campeão com IC,
+
+Construir a tabela de previsões,
+
+o app libera a seção:
+
+📘 Relatório Técnico — Interpretação Acadêmico-Aplicada
+
+Recursos:
+
+Upload opcional de PDF de contexto organizacional (lido via PyMuPDF),
+
+Geração de um prompt grande com:
+
+Metodologia,
+
+Parâmetros ARIMA,
+
+Métricas dos modelos,
+
+Estrutura do IC dinâmico,
+
+Importância das features do ML (se houver),
+
+Envio da imagem do gráfico (base64) + texto para a OpenAI,
+
+Uso do modelo gpt-4o para gerar um relatório técnico estruturado.
+
+O texto é exibido no Streamlit e salvo em st.session_state["relatorio_tecnico"].
+
+💡 A chave da OpenAI é lida de st.secrets["openai_api_key"].
+
+📄 Geração de PDF
+
+Com o relatório pronto, o app permite:
+
+Gerar um PDF completo via reportlab, contendo:
+
+Título com nome da filial,
+
+Gráfico do melhor modelo,
+
+Gráfico de importância de features (se existir),
+
+Tabela de métricas,
+
+Tabela com previsões futuras (data, horizonte, previsão, IC),
+
+Relatório técnico formatado.
+
+Função central: gerar_pdf_completo(...).
+O download é feito via st.download_button.
 reportlab
 pymupdf
 openai

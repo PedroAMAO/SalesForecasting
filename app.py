@@ -243,7 +243,7 @@ st.markdown("""
         html, body { font-size: 18px; }
     </style>
 """, unsafe_allow_html=True)
-st.title("📈 Forecaster Híbrido: Tendência + Sazonalidade + ARIMA + ML")
+st.title("📈 Previsão Híbrida de Vendas com Análise Automática por LLM")
 
 # ===============================
 # Utils
@@ -2546,6 +2546,7 @@ if 'relatorio_tecnico' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

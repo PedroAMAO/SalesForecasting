@@ -24,6 +24,34 @@ from reportlab.lib import colors
 from sklearn.ensemble import RandomForestRegressor
 
 
+
+def add_image_scaled(story, img_bytes, max_width_cm=15):
+    if img_bytes is None:
+        return
+
+    img_buf = io.BytesIO(img_bytes)
+
+    # cria o objeto
+    img = Image(img_buf)
+
+    # largura máxima em points (1 cm = 28.3465 pt)
+    max_width = max_width_cm * 28.3465
+
+    # proporção original
+    w, h = img.drawWidth, img.drawHeight
+
+    # se a imagem está maior que o máximo → escalar
+    if w > max_width:
+        scale = max_width / w
+        img.drawWidth = w * scale
+        img.drawHeight = h * scale
+
+    story.append(img)
+    story.append(Spacer(1, 0.5*cm))
+
+
+
+
 def traduz_feature(nome):
     # Mapeamento específico
     base_map = {
@@ -552,8 +580,7 @@ def gerar_pdf_completo(
         ))
         story.append(Spacer(1, 0.2*cm))
 
-        story.append(Image(io.BytesIO(img_best_model), width=16*cm))
-        story.append(Spacer(1, 0.6*cm))
+        add_image_scaled(story, img_best_model, max_width_cm=15)
 
     # =============================
     # FIGURA 2 — FEATURES IMPORTANTES
@@ -565,8 +592,7 @@ def gerar_pdf_completo(
         ))
         story.append(Spacer(1, 0.2*cm))
 
-        story.append(Image(io.BytesIO(img_features), width=16*cm))
-        story.append(Spacer(1, 0.8*cm))
+        add_image_scaled(story, img_features, max_width_cm=15)
 
     # =============================
     # TABELA DE MÉTRICAS
@@ -626,7 +652,6 @@ def gerar_pdf_completo(
     pdf_value = buffer.getvalue()
     buffer.close()
     return pdf_value
-
 
 
 def extract_context_text(context_file):
@@ -2464,6 +2489,7 @@ if 'relatorio_tecnico' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

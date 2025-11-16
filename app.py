@@ -1769,6 +1769,39 @@ if rodar_rolling:
     ax2.legend()
 
     st.pyplot(fig2)
+# ======================================================
+# 🧬 Importância das Features (Random Forest)
+# ======================================================
+if usar_ml:
+    st.markdown("## 🧬 Importância das Features (Modelo ML)")
+
+    try:
+        modelo_ml = modelo_ml_obj["modelo"]
+        feature_cols = modelo_ml_obj["feature_cols"]
+
+        importancias = modelo_ml.feature_importances_
+
+        df_feat_imp = pd.DataFrame({
+            "feature": feature_cols,
+            "importance": importancias
+        }).sort_values("importance", ascending=False)
+
+        st.dataframe(df_feat_imp)
+
+        # --- salvar para o relatório técnico ---
+        st.session_state["importancia_features"] = df_feat_imp
+
+        # --- gráfico ---
+        fig_imp, ax_imp = plt.subplots(figsize=(10, 6))
+        top_k = df_feat_imp.head(15)
+
+        ax_imp.barh(top_k["feature"], top_k["importance"])
+        ax_imp.invert_yaxis()
+        ax_imp.set_title("Top 15 Features Mais Relevantes (ML)")
+        st.pyplot(fig_imp)
+
+    except Exception as e:
+        st.warning(f"Não foi possível calcular importâncias de features: {e}")
 
 
 # ===============================
@@ -2177,6 +2210,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

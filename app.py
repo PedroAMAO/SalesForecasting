@@ -2120,6 +2120,10 @@ if usar_best_model:
     # aplica IC especial
     df_melhor_prev_ic = aplicar_ic_h(df_melhor_prev, resumo_h, data_corte)
 
+
+
+
+
 if usar_best_model:
 
     # ... seu código de rolling H, resumo, aplicação IC etc
@@ -2133,8 +2137,12 @@ if usar_best_model:
 
     ax_best.bar(df_filial['data'], df_filial['alvo'], width=20, alpha=0.3, color='gray')
 
-    ax_best.plot(df_melhor_prev_ic['data'], df_melhor_prev_ic['previsao'],
-                 '-o', color='green', label=f"{melhor_nome}")
+    ax_best.plot(
+        df_melhor_prev_ic['data'],
+        df_melhor_prev_ic['previsao'],
+        '-o', color='green',
+        label=f"{melhor_nome}"
+    )
 
     mask_fut = (
         (df_melhor_prev_ic['data'] > data_corte)
@@ -2147,23 +2155,38 @@ if usar_best_model:
         df_melhor_prev_ic.loc[mask_fut,'ic_inf'],
         df_melhor_prev_ic.loc[mask_fut,'ic_sup'],
         alpha=0.25, color='green'
-)
-
+    )
 
     ax_best.axvline(data_corte, linestyle='--', color='red')
 
     ax_best.set_title(f"IC dinâmico por horizonte — Modelo {melhor_nome}")
     ax_best.legend()
 
-    st.pyplot(fig_best)
+    # 👉 Renderiza no Streamlit
+#    st.pyplot(fig_best)
+
+    # 👉 Agora sim salva o gráfico no session_state
+    buf = io.BytesIO()
+    fig_best.savefig(buf, format="png", dpi=200, bbox_inches="tight")
+    buf.seek(0)
+
+    st.session_state["best_model_ready"] = True
+    st.session_state["best_model_image"] = buf.getvalue()
 
 
+# ================================
+# Exibição persistida do gráfico
+# ================================
+if st.session_state.get("best_model_ready", False):
+    st.image(st.session_state["best_model_image"])
+    st.markdown("⚙ Melhor modelo pronto.")
 
 
 # ===============================
 # 🧩 Relatório Técnico (LLM)
 # ===============================
-if usar_best_model:
+if st.session_state.get("best_model_ready", False):
+
 
     st.markdown("---")
     st.header("📘 Relatório Técnico — Interpretação Acadêmico-Aplicada")
@@ -2337,6 +2360,7 @@ if 'relatorio_llm' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 

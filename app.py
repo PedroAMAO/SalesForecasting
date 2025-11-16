@@ -2412,20 +2412,23 @@ Explique o significado técnico dessas variáveis:
 Produza um RELATÓRIO TÉCNICO, com tom acadêmico e aplicado, sobre a previsão de vendas
 da filial "{filial}". O relatório deve ter clareza, rigor e estrutura similar a um artigo técnico.
 
-## 1. Introdução Metodológica
+## 1. Introdução 
+Faça uma introdução sobre a importância e dificuldades de se fazer previsão de vendas.
+## 2. Metodologia Aplicada ao Caso                
 Explique detalhadamente:
+•  Sequencia aplicada na análise:
 • decomposição logarítmica da série;
 • modelagem de tendência (Linear, Quadrática ou Média);
 • sazonalidade média mensal;
-• reconstrução do nível original;
 • modelagem dos resíduos via ARIMA({p},{d},{q});
-    - Faça a interpretação de cada parâmetro do ARIMA
-• forecast do nível + ruído predito;
-• avaliação Rolling-Origin (evita vazamento e simula tempo real);
+    - Explica conceitualmente cada parâmetro do ARIMA e faça uma interpretação pratica dos mesmos.
+• forecast do nível + ruído predito, explique a reconstrução do modelo : tendência + sazonalidade + ruido projetado pelo ARIMA
+#• avaliação Rolling-Origin (evita vazamento e simula tempo real);
 • meta-modelo de Machine Learning (se ativo) como camada híbrida.
     Arquitetura do ML utilizada:
     {arch_ml_text}
-
+    Explique esse modelo, e seus hiperparâmetros.
+        
 ## 2. Metodologia Aplicada ao Caso
 Explique o passo a passo do estudo:
 • data de corte: {data_corte.date()};
@@ -2543,6 +2546,7 @@ if 'relatorio_tecnico' in st.session_state:
             )
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
+
 
 
 
